@@ -1,50 +1,43 @@
 /*!
- * Komponentor (single-file)
- * - Tree of components (parent/children), local scan
- * - Destroy cascades
- * - Optional hash router
- * - jQuery optional (used only as helper if present)
+ * Komponentor (single-file) — internal rapid-development runtime
+ * - Komponent: persistent UI, tree (parent/children), scan, destroy cascade
+ * - Intent: temporary UI only (modal, dialog, popup); mounts into outlet, close/destroy unmounts
+ * - Shared load pipeline (resolve → fetch → parse → init) for both
+ * - Optional hash router; declarative scan via data-komponent
+ * - Requires jQuery
  *
- * Public API (minimal):
- *   komponentor.root(host, urlOrOpts)
- *   komponentor.mount(host, urlOrOpts)
+ * Public API:
+ *   komponentor.root(host, urlOrOpts)  → Komponent (has readyPromise)
+ *   komponentor.mount(host, urlOrOpts) → Komponent (has readyPromise)
  *   komponentor.scan(container?, { parent?, replaceExisting? })
- *   komponentor.route({ outlet, routes, notFound }) — routes: path -> url (string) or callback(outletEl, route)
+ *   komponentor.route({ outlet, routes, notFound })
  *   komponentor.navigate(hash)
- *   komponentor.intent(urlOrOpts)  -> fluent .data(...).send({ parent })
- *   komponentor.runIntent(url, data, { parent })
+ *   komponentor.intent(urlOrOpts).data(...).send({ parent, outlet }) → Intent (readyPromise, resultPromise, close(result), destroy())
+ *   komponentor.runIntent(url, data, { parent, outlet }) → Intent
  *
- * Mount option: replaceHost: true — replace the host element with the component root (host is removed; id is copied so e.g. #app still works). Destroy then removes the new root from DOM. remount() mounts onto the detached node unless you pass a new host.
+ * Lifecycle (conceptual): initial → loading → loaded → mounting → mounted → initializing → ready | error; destroying → destroyed.
+ * Intent adds: closing before destroyed. replaceHost is an advanced option (host replaced by component root).
  *
- * Component marker:
- *   <div data-komponent="/path/to/component.html|id=5|foo=bar"></div>
+ * Component marker: <div data-komponent="/path/to/component.html|id=5|foo=bar"></div>
  *
- * Intent usage examples:
- *   // From a component (intent becomes part of the branch; destroyed when parent is destroyed)
- *   async function init_komponent(k, data) {
- *     const i = await komponentor.intent("modal.html|id=1").data({ source: k }).send({ parent: k });
- *     // i.ctx.ready, i.data; i may mount DOM via komponentor.mount(...) inside modal's init
- *   }
- *
- *   // Global intent (no parent; not attached to any component tree)
- *   const i = await komponentor.runIntent("service/worker.html", { task: "sync" });
+ * Intent (temporary UI): mounts real DOM into outlet (default body). Use close(result) to dismiss and resolve resultPromise.
  */
 
 (function (global) {
     "use strict";
-  
-    const $ = global.jQuery || null;
-  
+
+    const $ = global.jQuery;
+    if (!$ || typeof $.fn !== "object") throw new Error("Komponentor requires jQuery");
+
     // ----------------------------
     // utils
     // ----------------------------
-    const KEY_INST = "__kp_instance__";
-    const KEY_LOCK = "__kp_mounting__";
-  
+    // Instance/lock tracking: manager-level WeakMaps (no DOM-attached metadata).
+    // Element identity is the raw DOM node; jQuery sets are normalized to [0] where needed.
     function isPlainObject(x) {
       return x && typeof x === "object" && x.constructor === Object;
     }
-  
+
     function uid(prefix = "") {
       return (
         prefix +
@@ -53,41 +46,29 @@
         Math.random().toString(36).slice(2, 7)
       );
     }
-  
+
+    /** Host abstraction: always returns a jQuery collection (single element in practice). */
     function normalizeHost(host) {
-     
-      if (!host) throw new Error("Invalid host");
+      if (host == null) throw new Error("Invalid host");
       if (typeof host === "string") {
-        const el = document.querySelector(host);
-        if (!el) throw new Error(`Host not found: ${host}`);
-        return el;
+        const $el = $(host);
+        if (!$el.length) throw new Error("Host not found: " + host);
+        return $el;
       }
-      if ($ && host instanceof $) return host[0];
-      if (host instanceof Element) return host;
-      throw new Error("Invalid host type");
+      if (host.jquery) return host;
+      const $el = $(host);
+      if (!$el.length) throw new Error("Invalid host type");
+      return $el;
     }
-  
-    function getInst(el) {
-      return el ? el[KEY_INST] || null : null;
+
+    /** Normalize to raw DOM element for WeakMap key. */
+    function toElement(elOrJq) {
+      if (!elOrJq) return null;
+      if (elOrJq.jquery && elOrJq.length) return elOrJq[0];
+      const el = typeof elOrJq === "string" ? $(elOrJq)[0] : elOrJq;
+      return el && el.nodeType ? el : null;
     }
-    function setInst(el, inst) {
-      el[KEY_INST] = inst;
-    }
-    function clearInst(el, inst) {
-      if (el && el[KEY_INST] === inst) el[KEY_INST] = null;
-    }
-  
-    function lockHost(el, inst) {
-      // lock to prevent concurrent double-mount
-      if (el[KEY_LOCK]) return false;
-      el[KEY_LOCK] = inst || true;
-      return true;
-    }
-    function unlockHost(el, inst) {
-      if (!el) return;
-      if (el[KEY_LOCK] === inst || inst == null) el[KEY_LOCK] = null;
-    }
-  
+
     function parseSpec(specText) {
       // "/a/b.html|x=1|y=2" -> { url, data }
       const out = { url: "", data: {} };
@@ -117,14 +98,14 @@
     }
 
     // All data-* attributes from element as object (camelCase keys), excluding markerAttr
-    function getDataAttributesFromElement(el, markerAttr) {
-      if (!el || !el.dataset) return {};
+    function getDataAttributesFromElement(elOrJq, markerAttr) {
+      const $el = elOrJq && elOrJq.jquery ? elOrJq : $(elOrJq);
+      if (!$el.length) return {};
       const excludeKey = markerAttrToDatasetKey(markerAttr);
       const out = {};
-      for (const key in el.dataset) {
-        if (key === excludeKey) continue;
-        out[key] = el.dataset[key];
-      }
+      $.each($el.data(), function (key, val) {
+        if (key !== excludeKey) out[key] = val;
+      });
       return out;
     }
   
@@ -291,111 +272,97 @@
     }
   
     // ----------------------------
-    // Komponent (node in tree)
+    // Komponent (node in tree). Host abstraction is jQuery ($host); hostEl = $host[0] where raw node is needed.
     // ----------------------------
     class Komponent {
-      constructor(manager, host, opts) {
+      constructor(manager, $host, opts, lockToken) {
         this.manager = manager;
-  
-        this.hostEl = normalizeHost(host);
-        this.$host = $ ? $(this.hostEl) : null;
-  
+        this.$host = $host;
+        this.hostEl = this.$host[0];
+
         this.opts = manager._normalizeOpts(opts);
         this.url = this.opts.url || "";
         this.data = this.opts.data || {};
-  
+
         this.parent = this.opts.parent || null;
         this.children = [];
         this._scanned = false;
         this._destroyed = false;
-  
-        // mount "lock" early (prevents concurrent double-mount)
-        if (!lockHost(this.hostEl, this)) {
-          // if another mount is in-flight, best effort: return existing instance if any
-          const existing = getInst(this.hostEl);
-          if (existing) return existing;
-          // else: allow but it's risky; throw in debug
-          if (manager.config.debug) {
-            throw new Error("Host is already mounting (concurrent mount detected).");
-          }
-        }
-  
-        // attach instance to host early (ownership)
-        setInst(this.hostEl, this);
-  
-        // context
+
+        this._lockToken = lockToken !== undefined ? lockToken : this;
+        if (lockToken === undefined) manager.setInst(this.$host, this);
         this.ctx = new Context(this, manager);
-  
-        // link parent/child (component tree); parent may be Komponent or Intent
+
         if (this.parent && (this.parent instanceof Komponent || this.parent instanceof Intent)) {
           this.parent.children.push(this);
           this.ctx.parent = this.parent.ctx;
           this.parent.ctx.children.push(this.ctx);
         }
-  
-        // cleanup ownership on destroy
+
         this.ctx.onDestroy(() => {
-          unlockHost(this.hostEl, this);
-          clearInst(this.hostEl, this);
+          manager.unlockHost(this.$host, this._lockToken);
+          manager.clearInst(this.$host, this);
+        });
+
+        this._readyResolve = null;
+        this._readyReject = null;
+        this.readyPromise = new Promise((resolve, reject) => {
+          this._readyResolve = resolve;
+          this._readyReject = reject;
         });
       }
-  
-      // helper: scoped query
+
       find(selector) {
-        return this.hostEl.querySelector(selector);
+        return this.$host.find(selector)[0] || null;
       }
 
       findAll(selector) {
-        return Array.from(this.hostEl.querySelectorAll(selector));
+        return this.$host.find(selector).toArray();
       }
   
       // public: mount once (if re-called, destroys first by policy)
+      // Lifecycle: loading -> loaded -> mounting -> mounted -> initializing -> ready (or error)
       async mount() {
         if (this._destroyed) return this;
   
-        // policy: if mount called again, destroy then remount (user requested)
-        // (manager.mount() also enforces replace if needed)
         this.ctx.state = "loading";
+        if (this.opts.overlay !== false) this.manager.overlay.show(this);
   
         try {
-          // overlay
-          if (this.opts.overlay !== false) this.manager.overlay.show(this);
-  
-          // fetch html
-          const url = this.manager._resolveUrl(this.url);
-          const htmlText = await this.ctx.requestText(url, this.manager.config.fetchOptions || {});
-          if (htmlText == null) return this;
-  
-          // parse -> template + init
-          const {fragment, init} = this.manager._parseHtml(htmlText, this);
-          this.ctx.state = "rendering";
-  
-          // render into host (replace contents)
-          this.manager._renderIntoHost(this, fragment);
-  
-          this.ctx.state = "init";
-          // run init (if exists)
-          if (typeof init === "function") {
-            await init(this, this.data);
+          const parsed = await this.manager._runLoadPipeline(this.url, this.ctx, this);
+          if (parsed == null) {
+            this.ctx.state = "error";
+            const err = new Error("Component load aborted or stale");
+            if (this._readyReject) this._readyReject(err);
+            return this;
           }
+          const { content, init } = parsed;
+  
+          this.ctx.state = "loaded";
+          this.ctx.state = "mounting";
+          this.manager._renderIntoHost(this, content);
+          this.ctx.state = "mounted";
+          this.ctx.state = "initializing";
+  
+          if (typeof init === "function") await init(this, this.data);
   
           this.ctx.ready = true;
           this.ctx.state = "ready";
   
-          // auto-scan children (once per component lifetime)
           if (this.opts.autoload !== false) {
             this.scan({ replaceExisting: this.opts.replaceExistingChildren === true });
           }
   
+          if (this._readyResolve) this._readyResolve(this);
         } catch (e) {
           this.ctx.state = "error";
           this.manager._renderError(this, e);
           if (this.manager.config.debug) this.manager.log("mount error", e);
+          if (this._readyReject) this._readyReject(e);
         } finally {
           this.manager.overlay.hide(this);
-          unlockHost(this.hostEl, this);
+          this.manager.unlockHost(this.$host, this._lockToken);
         }
-  
         return this;
       }
   
@@ -408,7 +375,7 @@
         if (this._scanned && replaceExisting !== true) return this;
         this._scanned = true;
   
-        this.manager.scan(this.hostEl, {
+        this.manager.scan(this.$host, {
           parent: this,
           replaceExisting,
         });
@@ -421,7 +388,7 @@
         if (this._destroyed) return this;
         this.destroy();
         // create a fresh instance on same host
-        return this.manager.mount(this.hostEl, Object.assign({}, this.opts, { replace: true }));
+        return this.manager.mount(this.$host, Object.assign({}, this.opts, { replace: true }));
       }
   
       destroy() {
@@ -442,13 +409,12 @@
           this.ctx.destroy();
         } catch (_) {}
   
-        // DOM ownership cleanup
         try {
           if (this.opts.replaceHost) {
-            if (this.hostEl.parentNode) this.hostEl.parentNode.removeChild(this.hostEl);
-            clearInst(this.hostEl, this);
+            this.$host.remove();
+            this.manager.clearInst(this.$host, this);
           } else {
-            this.hostEl.innerHTML = "";
+            this.$host.empty();
           }
         } catch (_) {}
   
@@ -461,8 +427,12 @@
     }
 
     // ----------------------------
-    // Intent (headless: no DOM, no render, no data-bind)
+    // Intent (temporary UI only: modal, dialog, popup, overlay).
+    // DOM contract: Intent owns a single wrapper element ($host). Content is appended inside it.
+    // find()/findAll() query inside $host. close()/destroy() remove $host from DOM.
     // ----------------------------
+    const INTENT_CONTAINER_CLASS = "komponentor-intent";
+
     class Intent {
       constructor(manager, opts) {
         this.manager = manager;
@@ -470,8 +440,12 @@
         this.url = opts.url || "";
         this.data = opts.data || {};
         this.parent = opts.parent || null;
+        this.outlet = opts.outlet != null ? opts.outlet : "body";
         this.children = [];
+        this.$host = null;
         this.hostEl = null;
+        this._destroyed = false;
+        this._resultSettled = false;
 
         this.ctx = new Context(this, manager);
 
@@ -480,40 +454,106 @@
           this.ctx.parent = this.parent.ctx;
           this.parent.ctx.children.push(this.ctx);
         }
+
+        this._readyResolve = null;
+        this._readyReject = null;
+        this.readyPromise = new Promise((resolve, reject) => {
+          this._readyResolve = resolve;
+          this._readyReject = reject;
+        });
+        this._resultResolve = null;
+        this.resultPromise = new Promise((resolve) => {
+          this._resultResolve = resolve;
+        });
       }
 
+      find(selector) {
+        return this.$host && this.$host.length ? this.$host.find(selector)[0] || null : null;
+      }
+
+      findAll(selector) {
+        return this.$host && this.$host.length ? this.$host.find(selector).toArray() : [];
+      }
+
+      /** Mount temporary UI into outlet and run init. Wrapper ($host) is created and appended to outlet.
+       * On success returns this; on failure sets ctx.state to "error", rejects readyPromise, and throws. */
       async run() {
-        if (this.ctx._destroyed) return this;
+        if (this.ctx._destroyed || this._destroyed) return this;
         if (!this.url) {
           this.ctx.state = "error";
           this.manager.log("intent run: no url");
-          return this;
+          const err = new Error("intent run: no url");
+          if (this._readyReject) this._readyReject(err);
+          throw err;
         }
         this.ctx.state = "loading";
         this.manager.log("intent run", this.url);
 
         try {
-          const url = this.manager._resolveUrl(this.url);
-          const htmlText = await this.ctx.requestText(url, this.manager.config.fetchOptions || {});
-          if (htmlText == null) return this;
-          const { fragment, init } = this.manager._parseHtml(htmlText, this);
-          this.hostEl = fragment.cloneNode(true);
-          console.log("hostEl",this.hostEl);
-          //document.body.appendChild(this.hostEl);
-          this.ctx.state = "init";
-          if (typeof init === "function") {
-            await init(this, this.data);
+          const parsed = await this.manager._runLoadPipeline(this.url, this.ctx, this);
+          if (parsed == null) {
+            this.ctx.state = "error";
+            const err = new Error("Intent load aborted or stale");
+            if (this._readyReject) this._readyReject(err);
+            throw err;
           }
+          const { content, init } = parsed;
+
+          this.ctx.state = "loaded";
+          this.ctx.state = "mounting";
+          const $outlet = $(this.outlet);
+          if (!$outlet.length) {
+            throw new Error("Intent outlet not found: " + this.outlet);
+          }
+          this.$host = $("<div>").addClass(INTENT_CONTAINER_CLASS).append(content.clone());
+          this.hostEl = this.$host[0];
+          $outlet.append(this.$host);
+          this.ctx.state = "mounted";
+          this.ctx.state = "initializing";
+          if (typeof init === "function") await init(this, this.data);
           this.ctx.ready = true;
           this.ctx.state = "ready";
+          if (this._readyResolve) this._readyResolve(this);
+          return this;
         } catch (e) {
+          if (this.$host && this.$host.length) this._unmount();
           this.ctx.state = "error";
           if (this.manager.config.debug) this.manager.log("intent run error", this.url, e);
+          if (this._readyReject) this._readyReject(e);
+          throw e;
         }
-        return this;
       }
 
-      destroy() {
+      _teardown(result) {
+        if (this._destroyed) return;
+        this._destroyed = true;
+        this._unmount();
+        if (!this._resultSettled && this._resultResolve) {
+          this._resultSettled = true;
+          this._resultResolve(result);
+        }
+        try {
+          this.ctx.destroy();
+        } catch (_) {}
+        this._unlinkFromParent();
+      }
+
+      close(result) {
+        if (this._destroyed) return;
+        if (this._resultSettled) return;
+        this.ctx.state = "closing";
+        this._teardown(result);
+      }
+
+      _unmount() {
+        if (this.$host && this.$host.length) {
+          this.$host.remove();
+          this.$host = null;
+          this.hostEl = null;
+        }
+      }
+
+      _unlinkFromParent() {
         const kids = this.children.slice();
         this.children = [];
         for (const ch of kids) {
@@ -521,13 +561,14 @@
             if (ch && typeof ch.destroy === "function") ch.destroy();
           } catch (_) {}
         }
-        try {
-          this.ctx.destroy();
-        } catch (_) {}
         if (this.parent && this.parent.children) {
           const i = this.parent.children.indexOf(this);
           if (i !== -1) this.parent.children.splice(i, 1);
         }
+      }
+
+      destroy() {
+        this._teardown(undefined);
       }
     }
 
@@ -625,17 +666,15 @@
           }
         };
   
-        global.addEventListener("hashchange", this._handler);
-        global.addEventListener("load", this._handler);
+        $(global).on("hashchange", this._handler);
         this._handler();
       }
-  
+
       stop() {
         if (!this._started) return;
         this._started = false;
         if (this._handler) {
-          global.removeEventListener("hashchange", this._handler);
-          global.removeEventListener("load", this._handler);
+          $(global).off("hashchange", this._handler);
         }
         this._handler = null;
       }
@@ -666,6 +705,10 @@
           },
           config
         );
+
+        // DOM ownership: WeakMap<Element, Instance> (no data-* on nodes)
+        this._instanceByElement = new WeakMap();
+        this._lockByElement = new WeakMap();
   
         this._root = null;    // Komponent
         this._rootCtx = null; // Context (for root bus convenience)
@@ -677,6 +720,34 @@
           show: (k) => this._overlayShow(k),
           hide: (k) => this._overlayHide(k),
         };
+      }
+
+      _el(elOrJq) {
+        return toElement(elOrJq);
+      }
+      getInst(elOrJq) {
+        const el = this._el(elOrJq);
+        return el ? this._instanceByElement.get(el) || null : null;
+      }
+      setInst(elOrJq, inst) {
+        const el = this._el(elOrJq);
+        if (el) this._instanceByElement.set(el, inst);
+      }
+      clearInst(elOrJq, inst) {
+        const el = this._el(elOrJq);
+        if (el && this._instanceByElement.get(el) === inst) this._instanceByElement.delete(el);
+      }
+      lockHost(elOrJq, owner) {
+        const el = this._el(elOrJq);
+        if (!el || this._lockByElement.get(el)) return false;
+        this._lockByElement.set(el, owner);
+        return true;
+      }
+      unlockHost(elOrJq, owner) {
+        const el = this._el(elOrJq);
+        if (!el) return;
+        const cur = this._lockByElement.get(el);
+        if (cur === owner || owner == null) this._lockByElement.delete(el);
       }
   
       log(...args) {
@@ -711,11 +782,12 @@
         return o;
       }
 
-      /** Intent opts only: url + data from spec and programmatic. No DOM/dataset. urlSpecData < programmaticData. */
+      /** Intent opts: url, data, parent, outlet (default body). */
       _normalizeIntentOpts(urlOrOpts) {
         let url = "";
         let data = {};
         let parent = null;
+        let outlet = "body";
         if (typeof urlOrOpts === "string") {
           const parsed = parseSpec(urlOrOpts);
           url = parsed.url;
@@ -726,137 +798,117 @@
           const fromUrl = url && url.includes("|") ? parseSpec(url).data : {};
           data = Object.assign({}, fromUrl, o.data || {});
           parent = o.parent != null ? o.parent : null;
+          outlet = o.outlet != null ? o.outlet : "body";
         }
-        return { url, data, parent };
+        return { url, data, parent, outlet };
       }
   
       _resolveUrl(url) {
-        let returnedUrl = url;
         if (!url) return url;
-        returnedUrl = (this.config.baseUrl && url[0] === "/") ? this.config.baseUrl + url : url;
-        console.log("returnedUrl",this.config.baseUrl,url, returnedUrl);
-        return returnedUrl;
+        return (this.config.baseUrl && url[0] === "/") ? this.config.baseUrl + url : url;
+      }
+
+      /**
+       * Shared load pipeline: resolve URL, fetch HTML, parse, extract script/init.
+       * Used by both Komponent and Intent. Returns { content, init } or null if aborted/stale.
+       */
+      async _runLoadPipeline(url, ctx, ownerForInit) {
+        const resolvedUrl = this._resolveUrl(url);
+        const htmlText = await ctx.requestText(resolvedUrl, this.config.fetchOptions || {});
+        if (htmlText == null) return null;
+        return this._parseHtml(htmlText, ownerForInit);
       }
   
-      // parse HTML string into DOM fragment + init function (scoped, no global pollution)
       _parseHtml(htmlText, komponent) {
-        // Put into template, strip <script>, keep scripts text, return fragment
-        const t = document.createElement("template");
-        t.innerHTML = String(htmlText);
-  
-        const scripts = Array.from(t.content.querySelectorAll("script"));
-        const code = scripts.map((s) => s.textContent || "").join("\n");
-        scripts.forEach((s) => s.remove());
-  
-        const fragment = t.content; // DocumentFragment
-  
-        // init extraction:
-        // Convention: scripts may define function init_komponent(k, data) { ... }
-        // We execute scripts in an isolated scope and then grab init_komponent if defined.
+        const $wrap = $("<div>").html(String(htmlText));
+        const $scripts = $wrap.find("script");
+        const code = $scripts.map(function () { return $(this).text(); }).get().join("\n");
+        $scripts.remove();
+        const $content = $wrap.contents();
+
         let init = null;
         if (code.trim()) {
-          try {
-            // NOTE: This runs arbitrary code from fetched HTML. That's your current model.
-            // Keep it isolated (no global init function).
-            const fn = new Function(
-              "komponent",
-              "data",
-              "komponentor",
-              `
-              "use strict";
-              ${code}
-              // if code declared function init_komponent, it will overwrite our local binding only if it was declared as var/let assignment.
-              // to support "function init_komponent(...) {}", we detect it via Function constructor scope:
-              return (typeof init_komponent === "function") ? init_komponent : null;
+          const fn = new Function(
+            "komponent",
+            "data",
+            "komponentor",
             `
-            );
-            // run once to obtain init function; then call later
-            const maybe = fn(komponent, komponent.data, this);
-            if (typeof maybe === "function") init = maybe;
-          } catch (e) {
-            if (this.config.debug) this.log("init parse error", e);
-          }
+            "use strict";
+            ${code}
+            return (typeof init_komponent === "function") ? init_komponent : null;
+            `
+          );
+          const maybe = fn(komponent, komponent.data, this);
+          if (typeof maybe === "function") init = maybe;
         }
-        return { fragment, init };
+        return { content: $content, init };
       }
-  
-      _renderIntoHost(komponent, fragment) {
-        const host = komponent.hostEl;
+
+      _renderIntoHost(komponent, content) {
+        const $host = komponent.$host;
         if (komponent.opts.replaceHost) {
-          const parent = host.parentNode;
-          if (!parent) {
+          const $parent = $host.parent();
+          if (!$parent.length) {
             if (this.config.debug) this.log("replaceHost: host has no parent, falling back to append");
-            host.innerHTML = "";
-            host.appendChild(fragment.cloneNode(true));
+            $host.empty().append(content.clone());
             return;
           }
-          const clone = fragment.cloneNode(true);
-          const childElements = clone.children ? Array.from(clone.children) : [];
-          let newRoot;
-          if (childElements.length === 1) {
-            newRoot = childElements[0];
-          } else if (childElements.length === 0) {
-            newRoot = document.createElement("div");
-          } else {
-            newRoot = document.createElement("div");
-            while (clone.firstChild) newRoot.appendChild(clone.firstChild);
+          const $clone = content.clone();
+          const $elementNodes = $clone.filter("*");
+          // replaceHost rule: exactly one top-level element required; throw otherwise.
+          if ($elementNodes.length !== 1) {
+            throw new Error(
+              "replaceHost requires exactly one top-level element in the component HTML; got " + $elementNodes.length
+            );
           }
-          if (host.id) newRoot.id = host.id;
-          parent.replaceChild(newRoot, host);
-          clearInst(host, komponent);
-          setInst(newRoot, komponent);
-          komponent.hostEl = newRoot;
-          if (komponent.$host) komponent.$host = $ ? $(newRoot) : null;
+          const $newRoot = $elementNodes.eq(0);
+          const hostId = $host.attr("id");
+          if (hostId) $newRoot.attr("id", hostId);
+          $host.replaceWith($newRoot);
+          this.clearInst($host, komponent);
+          this.setInst($newRoot, komponent);
+          komponent.hostEl = $newRoot[0];
+          komponent.$host = $newRoot;
         } else {
-          host.innerHTML = "";
-          host.appendChild(fragment.cloneNode(true));
+          $host.empty().append(content.clone());
         }
       }
-  
+
       _renderError(komponent, err) {
         try {
-          komponent.hostEl.innerHTML = this.config.errorHtml(komponent.url, err);
+          komponent.$host.html(this.config.errorHtml(komponent.url, err));
         } catch (_) {}
       }
-  
+
       _overlayShow(k) {
-        const host = k.hostEl;
-        if (!host) return;
-  
-        // If host isn't positioned, overlay absolute positioning is messy; simplest:
-        // create overlay as first child with position:relative wrapper.
-        // Minimal, predictable.
-        // You can replace this later with a better overlay implementation.
-  
-        // avoid duplicate overlay
-        if (k._overlayEl && k._overlayEl.parentNode) return;
-  
-        const ov = document.createElement("div");
-        ov.className = this.config.overlayClass;
-        ov.innerHTML = this.config.overlayHtml;
-  
-        ov.style.position = "relative";
-        ov.style.minHeight = "30px";
-        ov.style.border = "1px dashed silver";
-        ov.style.background = "#eee";
-        ov.style.zIndex = "999999";
-  
-        k._overlayEl = ov;
-        host.insertBefore(ov, host.firstChild);
+        const $host = k.$host;
+        if (!$host || !$host.length) return;
+
+        if (k._overlayEl && k._overlayEl.parent().length) return;
+
+        const $ov = $("<div>")
+          .addClass(this.config.overlayClass)
+          .html(this.config.overlayHtml)
+          .css({
+            position: "relative",
+            minHeight: "30px",
+            border: "1px dashed silver",
+            background: "#eee",
+            zIndex: "999999"
+          });
+
+        k._overlayEl = $ov;
+        $host.prepend($ov);
       }
-  
+
       _overlayHide(k) {
-        const ov = k._overlayEl;
-        if (ov && ov.parentNode) ov.parentNode.removeChild(ov);
+        if (k._overlayEl && k._overlayEl.parent().length) k._overlayEl.remove();
         k._overlayEl = null;
       }
   
       // ---------- Public API ----------
       root(host, urlOrOpts) {
-        console.log("root", host);
-        const el = normalizeHost(host);
-        console.log("el", el);
-        // destroy existing root if any
+        const $host = normalizeHost(host);
         if (this._root) {
           try {
             this._root.destroy();
@@ -864,60 +916,56 @@
           this._root = null;
           this._rootCtx = null;
         }
-        const k = this.mount(el, Object.assign({}, this._normalizeOpts(urlOrOpts), { replace: true, parent: null }));
+        const k = this.mount($host, Object.assign({}, this._normalizeOpts(urlOrOpts), { replace: true, parent: null }));
         this._root = k;
         this._rootCtx = k && k.ctx ? k.ctx : null;
         return k;
       }
   
       mount(host, urlOrOpts) {
-        const el = normalizeHost(host);
+        const $host = normalizeHost(host);
         const opts = this._normalizeOpts(urlOrOpts);
-  
-        // policy requested by you:
-        // - if mounting onto a host that already has a component, destroy first
-        const existing = getInst(el);
-        
+        const existing = this.getInst($host);
         if (existing && existing instanceof Komponent && opts.replace) existing.destroy();
         if (existing && !opts.replace) return existing;
-  
-        // create new component
-        const k = new Komponent(this, el, opts);
-  
-        // run mount async (fire-and-forget); user can await if they want:
-        // return k.mount() would change API; so keep instance return and let user await k.mount() optionally.
+        const lockToken = {};
+        if (!this.lockHost($host, lockToken)) {
+          const cur = this.getInst($host);
+          if (cur) return cur;
+          throw new Error("Host is already mounting (concurrent mount detected).");
+        }
+        const k = new Komponent(this, $host, opts, lockToken);
+        this.setInst($host, k);
         k.mount();
-  
         return k;
       }
   
-      scan(container = document.body, { parent = null, replaceExisting = false } = {}) {
-        const root = normalizeHost(container);
+      scan(container, { parent = null, replaceExisting = false } = {}) {
+        const $root = normalizeHost(container == null ? "body" : container);
         const attr = this.config.markerAttr;
+        const $nodes = $root.find("[" + attr + "]");
 
-        const nodes = Array.from(root.querySelectorAll(`[${attr}]`));
-        for (const node of nodes) {
-          const spec = node.getAttribute(attr) || "";
+        $nodes.each(function () {
+          const node = this;
+          const $node = $(node);
+          const spec = $node.attr(attr) || "";
           const parsed = parseSpec(spec);
-          const dataFromAttrs = getDataAttributesFromElement(node, attr);
+          const dataFromAttrs = getDataAttributesFromElement($node, attr);
           const data = Object.assign({}, parsed.data, dataFromAttrs);
 
-          const existing = getInst(node);
-          if (existing && !replaceExisting) continue;
-
+          const existing = this.getInst($node);
+          if (existing && !replaceExisting) return;
           if (existing && replaceExisting) {
-            try {
-              existing.destroy();
-            } catch (_) {}
+            try { existing.destroy(); } catch (_) {}
           }
 
-          this.mount(node, {
+          this.mount($node, {
             url: parsed.url,
             data,
             parent: parent,
             replace: true,
           });
-        }
+        }.bind(this));
       }
   
       route({ outlet = "#app", routes = {}, notFound = null } = {}) {
@@ -928,12 +976,13 @@
         this.router.navigate(hash);
       }
 
-      /** Fluent intent builder. .data(objOrKey, val).send({ parent }) -> Intent (after run). */
+      /** Fluent intent builder. .data(...).send({ parent, outlet }) -> Intent (after run). Intent has readyPromise, resultPromise, close(result), destroy(). */
       intent(urlOrOpts) {
         const manager = this;
         const opts = manager._normalizeIntentOpts(urlOrOpts);
         let _url = opts.url;
         let _data = Object.assign({}, opts.data);
+        let _outlet = opts.outlet;
         return {
           data(objOrKey, val) {
             if (objOrKey != null && typeof objOrKey === "object") {
@@ -943,18 +992,28 @@
             }
             return this;
           },
-          async send({ parent } = {}) {
-            const intent = new Intent(manager, { url: _url, data: _data, parent });
+          async send({ parent, outlet } = {}) {
+            const intent = new Intent(manager, {
+              url: _url,
+              data: _data,
+              parent: parent != null ? parent : opts.parent,
+              outlet: outlet != null ? outlet : _outlet,
+            });
             await intent.run();
             return intent;
           },
         };
       }
 
-      /** Convenience: runIntent(url, data, { parent }) -> Intent (after run). */
-      async runIntent(url, data, { parent } = {}) {
+      /** Convenience: runIntent(url, data, { parent, outlet }) -> Intent (after run). */
+      async runIntent(url, data, { parent, outlet } = {}) {
         const opts = this._normalizeIntentOpts({ url, data });
-        const intent = new Intent(this, { url: opts.url, data: opts.data, parent });
+        const intent = new Intent(this, {
+          url: opts.url,
+          data: opts.data,
+          parent: parent != null ? parent : opts.parent,
+          outlet: outlet != null ? outlet : opts.outlet,
+        });
         await intent.run();
         return intent;
       }

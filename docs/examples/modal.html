@@ -26,21 +26,13 @@
   
 <script>
     function init_komponent(k) {
-        const tmp = $("<div>").appendTo("body").append(k.hostEl.cloneNode(true));
-        k.hostEl = tmp;
-        const modalEl = k.hostEl.find(".modal")[0];
-        
+        // Intent mounts into body by default; k.$host is the wrapper, content is already in DOM
+        const modalEl = k.$host.find(".modal")[0];
         k.data.model.bindView(new KView($(modalEl).find(".modal-body"), k));
-
-        modalEl
-            .addEventListener("hidden.bs.modal",()=>{
-                console.log("hidden.bs.modal",this);
-                k.hostEl.remove();
-                k.destroy();
-            })
-        console.log("modalEl",k.hostEl,modalEl);
+        modalEl.addEventListener("hidden.bs.modal", function () {
+            k.close();
+        });
         const modal = new bootstrap.Modal(modalEl);
         modal.show();
-        
     }
 </script>

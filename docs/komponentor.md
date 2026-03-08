@@ -1,9 +1,11 @@
 # Komponentor
 
-Komponentor is a lightweight JavaScript framework for loading HTML components by URL, managing a tree of components with lifecycle and destroy cascades, and optional hash-based routing and headless intents.
+Komponentor is an internal JavaScript runtime for loading HTML components by URL, managing a tree of components (lifecycle, destroy cascade), temporary UI (Intents: modals, dialogs), and optional hash-based routing.
 
 **File:** `src/komponentor.js`  
-**Dependencies:** None required; jQuery is used only as a helper if present.
+**Dependencies:** jQuery (required).
+
+**For AI-assisted development and full API details**, use **[KOMPONENTOR-REFERENCE.md](./KOMPONENTOR-REFERENCE.md)** as the canonical reference.
 
 ---
 
@@ -85,6 +87,7 @@ Each mounted component is a **Komponent** with:
 - **`data`** - Data passed to init.
 - **`ctx`** - **Context** (see below).
 - **`parent`** / **`children`** - Component tree (parent may be Komponent or Intent).
+- **`readyPromise`** - Promise that resolves with this instance when ready, or rejects on mount error.
 
 **Methods:**
 
@@ -103,7 +106,7 @@ Each Komponent (and Intent) has a **Context** `k.ctx`:
 
 - **`k.ctx.id`** - Unique id.
 - **`k.ctx.ready`** - True after init has run.
-- **`k.ctx.state`** - `"initial"` | `"loading"` | `"rendering"` | `"init"` | `"ready"` | `"error"` | `"destroying"` | `"destroyed"`.
+- **`k.ctx.state`** - `"initial"` | `"loading"` | `"loaded"` | `"mounting"` | `"mounted"` | `"initializing"` | `"ready"` | `"error"` | `"closing"` (Intent) | `"destroying"` | `"destroyed"`.
 - **`k.ctx.parent`** - Parent context (if any).
 - **`k.ctx.children`** - Child contexts.
 
@@ -140,9 +143,9 @@ If present, this function is called after the fragment is rendered into the host
 
 ---
 
-## Intents (headless)
+## Intents (temporary UI)
 
-Intents load component HTML and run its init **without** rendering into a host. Use for modals, workers, or logic-only “components”.
+Intents are **for temporary UI only** (modals, dialogs, popups). They load component HTML, mount it into an **outlet** (default `body`), and remove it on **`close()`** or **`destroy()`**.
 
 **Fluent builder:**
 
@@ -150,18 +153,21 @@ Intents load component HTML and run its init **without** rendering into a host. 
 const intent = await komponentor.intent("modal.html|id=1")
   .data("model", myModel)
   .data({ source: k })
-  .send({ parent: k });
-// intent.ctx.ready, intent.data; intent may mount DOM inside its init
+  .send({ parent: k, outlet: "body" });
+await intent.readyPromise;
+// To dismiss and return a result: intent.close({ confirmed: true });
+const result = await intent.resultPromise;
 ```
 
 **Convenience:**
 
 ```javascript
-const intent = await komponentor.runIntent("service/worker.html", { task: "sync" });
+const intent = await komponentor.runIntent("modal.html", { task: "sync" }, { outlet: "#overlay" });
 ```
 
-- **`parent`** - Optional Komponent or Intent; the new Intent is attached as child and destroyed when parent is destroyed.
-- Intent has **`ctx`**, **`url`**, **`data`**, **`children`**, **`run()`**, **`destroy()`**. It does not replace any DOM; init can use `komponentor.mount()` if needed.
+- **`parent`** — Optional; Intent is destroyed when parent is destroyed.
+- **`outlet`** — Where to append the intent’s DOM; default `"body"`.
+- Intent has **`readyPromise`**, **`resultPromise`**, **`close(result?)`**, **`destroy()`**, **`ctx`**, **`url`**, **`data`**, **`children`**. Use **`close(result)`** to unmount and resolve **`resultPromise`**; do not manually remove DOM.
 
 ---
 
