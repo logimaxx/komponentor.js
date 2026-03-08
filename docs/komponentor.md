@@ -172,15 +172,22 @@ komponentor.route({
   outlet: "#app",           // selector for mount target
   routes: {
     "#/": "view1.html",
-    "#/users/:id": "user.html"
+    "#/users/:id": "user.html",
+    "#/custom": (outletEl, route) => {
+      // route = { hash, params }; mount or run custom logic
+      komponentor.mount(outletEl, { url: "custom.html", data: { route }, replace: true });
+    }
   },
-  notFound: "404.html"      // optional
+  notFound: "404.html"      // optional; can be a URL string or callback(outletEl, route)
 });
 ```
 
-- Routes are matched by hash (e.g. `#/users/5`). Pattern `:id` captures one segment.
-- On match, the outlet is mounted with `url` and `data: { route: { hash, params } }`, with `replace: true`.
-- **`komponentor.navigate(hash)`** - Sets `location.hash` (handler runs on `hashchange`).
+- **Routes** are matched by hash (e.g. `#/users/5`). Pattern `:id` captures one segment.
+- Each route value can be:
+  - **URL string** – The manager mounts that component in the outlet with `data: { route: { hash, params } }` and `replace: true`.
+  - **Callback** – `(outletEl, route) => void`. You can call `komponentor.mount(outletEl, ...)` with custom options, or run any logic. `route` is `{ hash, params }`.
+- **notFound** – Optional. Either a URL string (mount that component) or a callback `(outletEl, route)` where `route` has `params: {}`.
+- **`komponentor.navigate(hash)`** – Sets `location.hash` (handler runs on `hashchange`).
 
 ---
 

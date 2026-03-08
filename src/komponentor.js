@@ -9,7 +9,7 @@
  *   komponentor.root(host, urlOrOpts)
  *   komponentor.mount(host, urlOrOpts)
  *   komponentor.scan(container?, { parent?, replaceExisting? })
- *   komponentor.route({ outlet, routes, notFound })
+ *   komponentor.route({ outlet, routes, notFound }) — routes: path -> url (string) or callback(outletEl, route)
  *   komponentor.navigate(hash)
  *   komponentor.intent(urlOrOpts)  -> fluent .data(...).send({ parent })
  *   komponentor.runIntent(url, data, { parent })
@@ -561,18 +561,18 @@
         this.notFound = notFound;
         this.routes = [];
   
-        // accept object map or array
+        // accept object map or array; value per route is url (string) or callback(outletEl, route)
         if (Array.isArray(routes)) {
-          routes.forEach((r) => this.add(r.path, r.url));
+          routes.forEach((r) => this.add(r.path, r.url != null ? r.url : r.handler));
         } else {
-          Object.entries(routes).forEach(([path, url]) => this.add(path, url));
+          Object.entries(routes).forEach(([path, urlOrHandler]) => this.add(path, urlOrHandler));
         }
         return this;
       }
   
-      add(pathPattern, url) {
+      add(pathPattern, urlOrHandler) {
         const c = this._compile(pathPattern);
-        this.routes.push({ pattern: pathPattern, keys: c.keys, regex: c.regex, url });
+        this.routes.push({ pattern: pathPattern, keys: c.keys, regex: c.regex, handler: urlOrHandler });
         return this;
       }
   
@@ -582,7 +582,7 @@
           if (!m) continue;
           const params = {};
           r.keys.forEach((k, i) => (params[k] = m[i + 1]));
-          return { url: r.url, route: { hash, params } };
+          return { handler: r.handler, route: { hash, params } };
         }
         return null;
       }
@@ -594,27 +594,35 @@
         this._handler = () => {
           const hash = global.location.hash || "#/";
           const match = this.match(hash);
-  
           const outletEl = normalizeHost(this.outlet);
-          // replace root component on route change
+  
           if (!match) {
             if (this.notFound) {
-              this.manager.mount(outletEl, {
-                url: this.notFound,
-                data: { route: { hash, params: {} } },
-                replace: true,
-                parent: null,
-              });
+              const route = { hash, params: {} };
+              if (typeof this.notFound === "function") {
+                this.notFound(outletEl, route);
+              } else {
+                this.manager.mount(outletEl, {
+                  url: this.notFound,
+                  data: { route },
+                  replace: true,
+                  parent: null,
+                });
+              }
             }
             return;
           }
   
-          this.manager.mount(outletEl, {
-            url: match.url,
-            data: { route: match.route },
-            replace: true,
-            parent: null,
-          });
+          if (typeof match.handler === "function") {
+            match.handler(outletEl, match.route);
+          } else {
+            this.manager.mount(outletEl, {
+              url: match.handler,
+              data: { route: match.route },
+              replace: true,
+              parent: null,
+            });
+          }
         };
   
         global.addEventListener("hashchange", this._handler);
@@ -723,9 +731,11 @@
       }
   
       _resolveUrl(url) {
+        let returnedUrl = url;
         if (!url) return url;
-        if (this.config.baseUrl && url[0] === "/") return this.config.baseUrl + url;
-        return url;
+        returnedUrl = (this.config.baseUrl && url[0] === "/") ? this.config.baseUrl + url : url;
+        console.log("returnedUrl",this.config.baseUrl,url, returnedUrl);
+        return returnedUrl;
       }
   
       // parse HTML string into DOM fragment + init function (scoped, no global pollution)

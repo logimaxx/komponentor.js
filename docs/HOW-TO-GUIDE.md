@@ -212,8 +212,8 @@ komponentor.route({
 ```
 
 - **`outlet`** – Selector (or element) where the route component is mounted.
-- **`routes`** – Object: hash pattern → component URL. Patterns like `#/users/:id` produce **params**.
-- **`notFound`** – URL to load when no route matches.
+- **`routes`** – Object: hash pattern → **component URL (string)** or **callback(outletEl, route)**. Patterns like `#/users/:id` produce **params**. If the value is a function, it is called with the outlet element and `{ hash, params }`; you can then call `komponentor.mount(outletEl, ...)` with custom options or run any logic.
+- **`notFound`** – URL (string) or callback(outletEl, route) when no route matches.
 
 Navigate programmatically:
 
