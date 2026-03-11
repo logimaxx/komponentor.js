@@ -585,11 +585,11 @@
         this.notFound = null;
       }
   
-      // "#/users/:id" -> regex + keys
+      // "#/users/:id" -> regex + keys. Param segments :name are replaced with ([^/]+).
       _compile(pattern) {
         const keys = [];
         let rx = "^" + pattern.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-        rx = rx.replace(/\\:([a-zA-Z0-9_]+)/g, (_, k) => {
+        rx = rx.replace(/:([a-zA-Z0-9_]+)/g, (_, k) => {
           keys.push(k);
           return "([^/]+)";
         });
@@ -612,6 +612,7 @@
       }
   
       add(pathPattern, urlOrHandler) {
+        
         const c = this._compile(pathPattern);
         this.routes.push({ pattern: pathPattern, keys: c.keys, regex: c.regex, handler: urlOrHandler });
         return this;
@@ -636,6 +637,7 @@
           const hash = global.location.hash || "#/";
           const match = this.match(hash);
           const outletEl = normalizeHost(this.outlet);
+          
   
           if (!match) {
             if (this.notFound) {
@@ -838,7 +840,7 @@
             return (typeof init_komponent === "function") ? init_komponent : null;
             `
           );
-          const maybe = fn(komponent, komponent.data, this);
+          const maybe = fn(komponent, komponent.data, this).bind(komponent);
           if (typeof maybe === "function") init = maybe;
         }
         return { content: $content, init };

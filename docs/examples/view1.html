@@ -6,9 +6,10 @@
     <p>It is a simple example to showcase the Komponentor framework.</p>
     <button>Intent</button>
     <div id="test">
-        <input type="text" name="name" value="{{name}}"         onchange="$(this).parents('[is=kview]').data('model').update('name',this.value)" />
+        <input type="text" name="name" value="{{name}}"
+            onchange="$(this).parents('[is=kview]').data('model').update('name',this.value)" />
         <input type="text" name="age" value="{{age}}" 
-        onchange="$(this).parents('[is=kview]').data('model').update('age',this.value)"/>
+            onchange="$(this).parents('[is=kview]').data('model').update('age',this.value)"/>
     </div>
     <div id="test2">
         <p>Hello {{name}}</p>
@@ -17,12 +18,11 @@
 </div>
 <script>
     function init_komponent(k,data,options) {
-        console.log("init_komponent", k, data, options);
+        console.log("init_komponent view1", k, data, options,this);
         k.data.test = new KModel({name:"John",age:2});
         k.data.test.bindView(new KView(k.find("#test"), k));
         k.data.test.bindView(new KView(k.find("#test2"), k));
         
-        console.log(k.find("button"));
         k.find("button").addEventListener("click",()=>{
             komponentor.intent("modal.html").data("model",k.data.test).send();
         });
