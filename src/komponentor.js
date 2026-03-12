@@ -818,18 +818,24 @@
         const resolvedUrl = this._resolveUrl(url);
         const htmlText = await ctx.requestText(resolvedUrl, this.config.fetchOptions || {});
         if (htmlText == null) return null;
-        return this._parseHtml(htmlText, ownerForInit);
+        return this._parseHtml(htmlText, ownerForInit, resolvedUrl || url);
       }
   
-      _parseHtml(htmlText, komponent) {
+      _parseHtml(htmlText, komponent, sourceUrl) {
         const $wrap = $("<div>").html(String(htmlText));
         const $scripts = $wrap.find("script");
-        const code = $scripts.map(function () { return $(this).text(); }).get().join("\n");
+        let code = $scripts.map(function () { return $(this).text(); }).get().join("\n");
         $scripts.remove();
         const $content = $wrap.contents();
 
         let init = null;
         if (code.trim()) {
+          if (sourceUrl && typeof global.location !== "undefined") {
+            try {
+              sourceUrl = new URL(sourceUrl, global.location.origin).href;
+            } catch (_) {}
+            code = code + "\n//# sourceURL=" + sourceUrl;
+          }
           const fn = new Function(
             "komponent",
             "data",
