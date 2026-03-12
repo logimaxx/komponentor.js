@@ -313,13 +313,9 @@
       }
 
       find(selector) {
-        return this.$host.find(selector)[0] || null;
+        return this.$host.find(selector);
       }
 
-      findAll(selector) {
-        return this.$host.find(selector).toArray();
-      }
-  
       // public: mount once (if re-called, destroys first by policy)
       // Lifecycle: loading -> loaded -> mounting -> mounted -> initializing -> ready (or error)
       async mount() {
@@ -468,11 +464,7 @@
       }
 
       find(selector) {
-        return this.$host && this.$host.length ? this.$host.find(selector)[0] || null : null;
-      }
-
-      findAll(selector) {
-        return this.$host && this.$host.length ? this.$host.find(selector).toArray() : [];
+        return this.$host.find(selector);
       }
 
       /** Mount temporary UI into outlet and run init. Wrapper ($host) is created and appended to outlet.
