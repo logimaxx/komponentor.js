@@ -44,24 +44,24 @@ This document is the **canonical reference** for the Komponentor library. Use it
 ### 4.1 Mounting persistent UI
 
 ```javascript
-// Set app root; destroys any previous root. Returns Komponent.
+// Set app root; destroys any previous root. Returns Promise<Komponent> (resolves when mounted + ready).
 komponentor.root(host, urlOrOpts)
 
-// Mount a component at host. Returns Komponent (mount runs async).
+// Mount a component at host. Returns Promise<Komponent> (awaits load, render, init).
 komponentor.mount(host, urlOrOpts)
 ```
 
 - **host**: CSS selector string, DOM element, or jQuery collection; internally normalized to a jQuery collection.
 - **urlOrOpts**: String (URL or spec `"url|key=val|..."`) or options object (see Mount options below).
-- **Return**: Komponent instance. Each instance has **`readyPromise`** (resolves with the instance when ready, rejects on mount error).
+- **Return**: **`Promise<Komponent>`** that resolves when the component is fully loaded, rendered, and `init_komponent` has finished (or rejects when the mount fails). You can **`await`** it. Each instance also has **`readyPromise`** with the same semantics.
 
 **Example:**
 
 ```javascript
-const k = komponentor.mount("#app", "app.html");
-await k.readyPromise;  // wait until ready
-// or
-komponentor.root("#app", { url: "app.html", data: { id: 1 } });
+const k = await komponentor.mount("#app", "app.html");
+// k is ready; DOM and init are done
+
+await komponentor.root("#app", { url: "app.html", data: { id: 1 } });
 ```
 
 ### 4.2 Scan (declarative child components)
@@ -117,33 +117,59 @@ try {
 ### 4.4 Router
 
 ```javascript
-komponentor.route({ outlet?, routes?, notFound? })
-komponentor.navigate(hash)
+komponentor.route({ mode?, outlet?, routes?, notFound?, ignore? })
+komponentor.navigate(pathOrHash, { replace?, state? })
 ```
 
+- **mode**: Router mode. `"hash"` (default) or `"history"`.
 - **outlet**: Selector for the element where route components are mounted (e.g. `"#app"`). Resolved via `normalizeHost`, so **outletEl** in callbacks is a jQuery collection.
-- **routes**: Object `{ "#/path": urlOrHandler, ... }`. Value can be:
-  - **URL string** — Component is mounted with `data: { route: { hash, params } }` and `replace: true`.
-  - **Callback** — `(outletEl, route) => void`. **outletEl** is a jQuery collection; `route` is `{ hash, params }` (params from `:id`-style segments).
+- **routes**:
+  - In `"hash"` mode: Object `{ "#/path": urlOrHandler, ... }`.
+  - In `"history"` mode: Object `{ "/path": urlOrHandler, ... }`.
+  - Value can be:
+    - **URL string** — Component is mounted with `replace: true` and route data.
+    - **Callback** — `(outletEl, route) => void`.
 - **notFound**: Optional. URL string or callback `(outletEl, route)`.
-- **navigate(hash)** — Sets `location.hash` (triggers route handler).
-- The router listens only to **hashchange** and runs the handler once on **start()** for the initial hash; it does **not** bind the `load` event.
+- **ignore**: Optional string/regex/function (or array) used to skip route dispatch for matching URLs.
+- **navigate(pathOrHash, opts)**:
+  - `"hash"` mode: sets `location.hash`.
+  - `"history"` mode: uses `history.pushState()` (or `replaceState()` when `opts.replace === true`) and dispatches immediately.
+- Listeners:
+  - `"hash"` mode listens to **hashchange**.
+  - `"history"` mode listens to **popstate**.
+  - Both modes dispatch once immediately on `route(...)`.
 
 **Example:**
 
 ```javascript
 komponentor.route({
+  mode: "hash",
   outlet: "#view",
   routes: {
     "#/": "home.html",
     "#/users/:id": "user.html",
     "#/custom": (outletEl, route) => {
-      komponentor.mount(outletEl, { url: "custom.html", data: { route }, replace: true });
+      void komponentor.mount(outletEl, { url: "custom.html", data: { route }, replace: true });
     }
   },
   notFound: "404.html"
 });
 komponentor.navigate("#/users/5");
+```
+
+**History mode example:**
+
+```javascript
+komponentor.route({
+  mode: "history",
+  outlet: "#view",
+  routes: {
+    "/": "home.html",
+    "/users/:id": "user.html"
+  },
+  notFound: "404.html"
+});
+komponentor.navigate("/users/5");
 ```
 
 ---
@@ -232,7 +258,7 @@ komponentor.navigate("#/users/5");
 ```javascript
 function init_komponent(k, data) {
   k.ctx.onDestroy(() => { /* cleanup */ });
-  komponentor.mount(k.find("#nested"), "nested.html", { parent: k });
+  void komponentor.mount(k.find("#nested"), "nested.html", { parent: k }); // or await if init_komponent is async
 }
 ```
 
@@ -287,10 +313,11 @@ Arguments can be DOM element, jQuery collection, or selector string. Instance tr
 ## 14. Common patterns (for AI)
 
 - **Root + scan**: `komponentor.root("#app", "app.html");` — app.html’s init can call `komponentor.scan(k.$host, { parent: k })` or rely on `autoload: true`.
-- **Router**: `komponentor.route({ outlet: "#app", routes: { "#/": "home.html" } });` then links with `href="#/..."` or `komponentor.navigate("#/path")`.
+- **Router (hash)**: `komponentor.route({ mode: "hash", outlet: "#app", routes: { "#/": "home.html" } });` then links with `href="#/..."` or `komponentor.navigate("#/path")`.
+- **Router (history)**: `komponentor.route({ mode: "history", outlet: "#app", routes: { "/": "home.html" } });` then links with normal paths (`href="/..."`) or `komponentor.navigate("/path")`.
 - **Modal with result**: Use `try/catch` (or `.catch()`) on `send()` / `runIntent()` — they reject when the intent fails. On success: `const i = await komponentor.intent("modal.html").data({ model }).send({ parent: k }); const result = await i.resultPromise;` and in modal init/button: `k.close({ confirmed: true })`.
 - **Replace host (e.g. root outlet)**: `komponentor.root("#app", { url: "app.html", replaceHost: true });` so `#app` is replaced by the component root (id preserved).
-- **Await ready**: `const k = komponentor.mount(host, opts); await k.readyPromise;` before using `k` in DOM-dependent code (or handle rejection for abort/error).
+- **Await ready**: `const k = await komponentor.mount(host, opts);` — `k` is ready when the promise resolves (or `await k.readyPromise` if you already hold the instance).
 
 ---
 
