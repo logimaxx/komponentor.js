@@ -2,36 +2,66 @@
 
 A lightweight JavaScript framework for building modular web applications with HTML-based components, a component tree, hash routing, and optional headless intents.
 
+**Requires jQuery** (`>=1.9.0`) loaded before Komponentor.
+
+## Install
+
+```bash
+npm install komponentor jquery
+```
+
+Or use the built files from `dist/` (also on npm). Load jQuery first, then Komponentor:
+
+```html
+<script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
+<script src="node_modules/komponentor/dist/komponentor.min.js"></script>
+<script src="node_modules/komponentor/dist/ksimpleviews.min.js"></script>
+```
+
+After publishing, CDN (example):
+
+```html
+<script src="https://cdn.jsdelivr.net/npm/komponentor@1.2.0/dist/komponentor.min.js"></script>
+```
+
+## Demo
+
+A minimal walkthrough lives in **[docs/demo/](docs/demo/)**. From the repo root:
+
+```bash
+npm install
+npm run build
+npm run demo
+```
+
+Open `http://localhost:3000` (serves `docs/demo/`). For local development without `serve`, run any static server from the **repository root** so `../../dist/` paths resolve.
+
 ## Features
 
-- **Components** - Load HTML by URL into a host element; optional `init_komponent(komponent, data)` script; no build step.
-- **Component tree** - Parent/child hierarchy with cascade destroy.
-- **Replace host** - Option `replaceHost: true` to replace the host element with the component root (host removed; `id` copied for selectors).
-- **Scan** - Auto-mount components from `data-komponent="url|key=val"` markers in the DOM.
-- **Hash router** - Map hash paths to components; mount in an outlet with route params.
-- **Intents** - Headless "components" (no DOM node): load HTML, run init, optionally attach UI via the manager; can be part of the tree (destroy with parent).
-- **jQuery optional** - Core works without jQuery; jQuery is used only as a helper when present.
+- **Components** — Load HTML by URL into a host element; optional `init_komponent(komponent, data)` script; no build step.
+- **Component tree** — Parent/child hierarchy with cascade destroy.
+- **Replace host** — Option `replaceHost: true` to replace the host element with the component root (host removed; `id` copied for selectors).
+- **Scan** — Auto-mount components from `data-komponent="url|key=val"` markers in the DOM.
+- **Hash router** — Map hash paths to components; mount in an outlet with route params.
+- **Intents** — Headless flows: load HTML, run init, attach UI (e.g. modals); optional parent for tree lifecycle.
+- **KSimpleViews** (optional) — `KModel` + `KView` for simple template binding.
 
-## Repository contents
+## Repository layout
 
-| Module        | File(s)        | Description |
-|---------------|----------------|-------------|
-| **Komponentor** | `src/komponentor.js` | Single-file runtime: mount, scan, route, intent, context lifecycle. |
-| **KSimpleViews** | `src/ksimpleviews.js` | KModel + KView: template rendering (Handlebars or built-in `{{key}}` fallback). Requires jQuery. |
-
-
-The build (esbuild) outputs to `dist/`: each script has a development (e.g. `komponentor.js`) and a minified (e.g. `komponentor.min.js`) version, both with source maps.
+| Module | Source | Built output |
+|--------|--------|--------------|
+| **Komponentor** | `src/komponentor.js` | `dist/komponentor.js`, `dist/komponentor.min.js` |
+| **KSimpleViews** | `src/ksimpleviews.js` | `dist/ksimpleviews.js`, `dist/ksimpleviews.min.js` |
 
 ## Quick start
 
-1. **Include the script** (and optionally jQuery):
+1. **Include jQuery, then Komponentor** (jQuery must load first):
 
 ```html
 <div id="app"></div>
-<script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
-<script src="path/to/komponentor.js"></script>
+<script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
+<script src="path/to/komponentor.min.js"></script>
 <script>
-  komponentor.config.debug = true;
   komponentor.config.baseUrl = "/";
   komponentor.root("#app", "components/welcome.html");
 </script>
@@ -45,7 +75,7 @@ The build (esbuild) outputs to `dist/`: each script has a development (e.g. `kom
 </div>
 <script>
   function init_komponent(komponent, data) {
-    // komponent.find("h1"), komponent.ctx.on(...), etc.
+    komponent.find("h1").text("Hello, " + (data.name || "world"));
   }
 </script>
 ```
@@ -64,38 +94,36 @@ komponentor.route({
 komponentor.navigate("#/about");
 ```
 
-## API (single-file Komponentor)
+## API (Komponentor)
 
 | Method | Description |
 |--------|-------------|
 | `komponentor.root(host, urlOrOpts)` | Set app root; replace previous root. |
-| `komponentor.mount(host, urlOrOpts)` | Mount a component on `host`. Options include `replaceHost: true` (replace host with component root). |
+| `komponentor.mount(host, urlOrOpts)` | Mount a component on `host`. Options include `replaceHost: true`. |
 | `komponentor.scan(container?, { parent?, replaceExisting? })` | Mount all `[data-komponent]` in `container`. |
 | `komponentor.route({ outlet, routes, notFound })` | Configure and start hash router. |
 | `komponentor.navigate(hash)` | Set `location.hash`. |
-| `komponentor.intent(urlOrOpts).data(...).send({ parent? })` | Run a headless intent (no DOM); optional `parent` for tree lifecycle. |
+| `komponentor.intent(urlOrOpts).data(...).send({ parent? })` | Run an intent; optional `parent` for tree lifecycle. |
 | `komponentor.runIntent(url, data, { parent? })` | Convenience wrapper for intent. |
 
 Component marker in HTML: `data-komponent="/path/to/file.html|key=value"`.
 
 ## Build
 
-Build is powered by **esbuild**. Each file in `src/` is built to `dist/` as both a development and a minified bundle (with source maps).
-
 ```bash
 npm install
 npm run build
 ```
 
-Output: `dist/<name>.js` and `dist/<name>.min.js` for each `src/<name>.js`. Use `npm run watch` to rebuild on change.
+Output: `dist/<name>.js` and `dist/<name>.min.js` (with source maps). Use `npm run watch` during development.
+
+`npm publish` runs `prepublishOnly` → build automatically.
 
 ## Documentation
 
-- **[docs/komponentor.md](docs/komponentor.md)** - Komponentor: API, config, mount/scan, Context, Komponent, Intent, router.
-- **[docs/ksimpleviews.md](docs/ksimpleviews.md)** - KSimpleViews: KModel, KView, getKModel, templates, lifecycle.
-- **[docs/HOW-TO-GUIDE.md](docs/HOW-TO-GUIDE.md)** - Single-file Komponentor: setup, mount, scan, router, intents, nested components, events.
-
-Example pages are in **docs/examples/**.
+- **[docs/komponentor.md](docs/komponentor.md)** — API, config, mount/scan, Context, Komponent, Intent, router.
+- **[docs/ksimpleviews.md](docs/ksimpleviews.md)** — KModel, KView, templates, lifecycle.
+- **[docs/HOW-TO-GUIDE.md](docs/HOW-TO-GUIDE.md)** — Practical guide: setup, router, intents, nested components.
 
 ## Author
 

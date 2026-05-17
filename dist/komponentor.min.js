@@ -1,6 +1,6 @@
-/*! komponentor v1.0.0
- * A jQuery plugin to create modular web apps
- * (c) 2026 Sergiu Voicu (Logimaxx Systems SRL) https://logimaxx.ro
+/*! komponentor v1.2.0
+ * Lightweight HTML-based components, hash routing, and intents for jQuery apps — no build step required.
+ * (c) 2026 Sergiu Voicu <https://logimaxx.ro>
  * Released under the MIT License
  */
 

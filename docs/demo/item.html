@@ -1,0 +1,12 @@
+<div>
+    <h2 class="h5">Item</h2>
+    <p class="small text-muted mb-2">Route <code>#/item/:id</code> — param from <code>data.route.params</code> in <code>init_komponent</code>.</p>
+    <p>id: <strong id="item-id"></strong></p>
+    <a href="#/">← Back to list</a>
+</div>
+<script>
+    function init_komponent(k, data) {
+        const id = data.route && data.route.params && data.route.params.id;
+        k.find("#item-id").text(id || "—");
+    }
+</script>

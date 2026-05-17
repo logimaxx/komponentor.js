@@ -211,7 +211,7 @@ For advanced use, the following are attached to `komponentor`:
 
 ## Load order
 
-1. jQuery (optional).
+1. jQuery (required; global `jQuery` or `$`, `>=1.9.0`).
 2. `komponentor.js`.
 
 
@@ -221,6 +221,7 @@ For advanced use, the following are attached to `komponentor`:
 
 ```html
 <div id="app" data-komponent="app.html"></div>
+<script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
 <script src="komponentor.js"></script>
 <script>
   komponentor.config.baseUrl = "./";

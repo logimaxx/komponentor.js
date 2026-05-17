@@ -1,0 +1,31 @@
+<div class="modal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Theme</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <p class="small text-muted mb-2">Intent loaded via <code>komponentor.intent(…).data("theme", …).send()</code>. Same <code>KModel</code> as the shell — all bound views update together.</p>
+                <div id="theme-modal-swatch" class="p-3 rounded mb-3 border" style="background: {{color}}33;">
+                    <span style="color: {{color}};">{{color}}</span>
+                </div>
+                <div id="theme-modal-picker">
+                    <label class="form-label">Color</label>
+                    <input type="color" class="form-control form-control-color" value="{{color}}"
+                        onchange="getKModel(this).update('color', this.value)" />
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+<script>
+    function init_komponent(k, data) {
+        data.theme.bindView(new KView(k.find("#theme-modal-swatch"), k));
+        data.theme.bindView(new KView(k.find("#theme-modal-picker"), k));
+
+        const $modal = k.find(".modal");
+        $modal.on("hidden.bs.modal", () => k.close());
+        new bootstrap.Modal($modal[0]).show();
+    }
+</script>

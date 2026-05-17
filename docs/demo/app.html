@@ -1,0 +1,32 @@
+<div>
+    <div id="theme-preview" class="mb-3 p-3 rounded border">
+        <p class="small text-muted mb-1 mb-md-2">Shell preview — bound with <code>KView</code></p>
+        <span class="fw-semibold" style="color: {{color}};">Accent {{color}}</span>
+    </div>
+    <nav class="mb-3">
+        <a href="#/" class="btn btn-sm btn-outline-primary">List</a>
+        <a href="#/item/42" class="btn btn-sm btn-outline-secondary">Item 42</a>
+        <button type="button" id="btn-about" class="btn btn-sm btn-link">Theme (intent)</button>
+    </nav>
+    <div id="view" class="border rounded p-3 bg-light"></div>
+</div>
+<script>
+    function init_komponent(k) {
+        k.data.theme = new KModel({ color: "#0d6efd" });
+        k.data.theme.bindView(new KView(k.find("#theme-preview"), k));
+
+        komponentor.route({
+            outlet: "#view",
+            routes: {
+                "#/": "list.html",
+                "#/item/:id": "item.html"
+            }
+        });
+
+        k.find("#btn-about").on("click", () => {
+            komponentor.intent("about.html")
+                .data("theme", k.data.theme)
+                .send({ parent: k });
+        });
+    }
+</script>

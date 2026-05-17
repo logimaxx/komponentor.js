@@ -1,6 +1,6 @@
 # How to Use Komponentor (Single-File)
 
-A practical guide for **`src/komponentor.js`**: the single-file, jQuery-optional framework for HTML-based components, a component tree, and hash routing.
+A practical guide for **`src/komponentor.js`**: the single-file framework for HTML-based components, a component tree, and hash routing. **Requires jQuery** (global `jQuery` or `$`, `>=1.9.0`).
 
 ---
 
@@ -25,13 +25,13 @@ A practical guide for **`src/komponentor.js`**: the single-file, jQuery-optional
 | `komponentor.intent(urlOrOpts)` | Fluent builder for a **headless intent** (no DOM, no render). `.data(...).send({ parent })` → Intent. |
 | `komponentor.runIntent(url, data, { parent })` | Convenience: create and run an intent; returns the Intent instance. |
 
-No build step; no jQuery required (jQuery is used only as a helper when present).
+No build step. **jQuery is required** — load it before `komponentor.js` (see [komponentor.md](./komponentor.md)).
 
 ---
 
 ## 2. Setup
 
-Include the single script (and optionally jQuery):
+Include jQuery first, then `komponentor.js`:
 
 ```html
 <!DOCTYPE html>
@@ -42,7 +42,6 @@ Include the single script (and optionally jQuery):
 <body>
   <div id="app"></div>
 
-  <!-- Optional: jQuery (used only if present) -->
   <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
   <script src="path/to/komponentor.js"></script>
   <script>
@@ -518,4 +517,4 @@ By default, **scan** runs only once per component (on first load). To allow re-s
 | Nested placeholders | Put `data-komponent="url|key=val"` in HTML; use autoload or call `scan()` |
 | Intent in tree (destroy with parent) | Pass `parent: komponent` to `.send({ parent })` or `runIntent(..., { parent })` |
 
-For more examples, see the **examples** folder and **docs/USAGE-GUIDE.md** (older multi-file stack).
+For a runnable walkthrough, see **[docs/demo/](demo/)** (router, intent, shared `KModel`).

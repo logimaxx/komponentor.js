@@ -1,24 +1,46 @@
 {
   "name": "komponentor",
-  "version": "1.0.0",
-  "description": "A jQuery plugin to create modular web apps",
+  "version": "1.2.0",
+  "description": "Lightweight HTML-based components, hash routing, and intents for jQuery apps — no build step required.",
   "main": "dist/komponentor.min.js",
+  "files": [
+    "dist",
+    "LICENSE",
+    "README.md"
+  ],
   "scripts": {
     "build": "node build.mjs",
-    "watch": "node build.mjs --watch"
+    "watch": "node build.mjs --watch",
+    "prepublishOnly": "npm run build",
+    "demo": "npx --yes serve docs/demo -l 3000"
   },
-  "author": "Sergiu Voicu (Logimaxx Systems SRL) https://logimaxx.ro",
+  "keywords": [
+    "jquery",
+    "jquery-plugin",
+    "components",
+    "micro-frontends",
+    "hash-router",
+    "spa",
+    "html-components",
+    "intent",
+    "mvvm"
+  ],
+  "author": "Sergiu Voicu <https://logimaxx.ro>",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/yourusername/komponentor.git"
+    "url": "git+https://github.com/vsergione/komponentor.js.git"
+  },
+  "homepage": "https://github.com/vsergione/komponentor.js#readme",
+  "bugs": {
+    "url": "https://github.com/vsergione/komponentor.js/issues"
+  },
+  "peerDependencies": {
+    "jquery": ">=1.9.0"
   },
   "devDependencies": {
     "@testing-library/jest-dom": "^6.6.3",
     "esbuild": "^0.24.0",
     "jest": "^29.7.0"
-  },
-  "dependencies": {
-    "jquery": ">=1.9.0"
   }
 }
