@@ -1,6 +1,6 @@
 # How to Use Komponentor (Single-File)
 
-A practical guide for **`src/komponentor.js`**: the single-file framework for HTML-based components, a component tree, and hash routing. **Requires jQuery** (global `jQuery` or `$`, `>=1.9.0`).
+A practical guide for `**src/komponentor.js**`: the single-file framework for HTML-based components, a component tree, and hash routing. **Requires jQuery** (global `jQuery` or `$`, `>=1.9.0`).
 
 ---
 
@@ -9,23 +9,29 @@ A practical guide for **`src/komponentor.js`**: the single-file framework for HT
 **Komponentor** lets you:
 
 - **Mount** HTML components by URL into a host element (fetch HTML, run optional init script, render).
+
 - Build a **tree** of components (parent/children); destroy cascades down.
 - **Scan** the DOM for `data-komponent="url|key=val"` and mount components automatically.
-- Use optional **hash routing** to mount different components in an outlet by path.
+- Use optional **hash or history routing** to mount different components in an outlet by URL.
 
 **Public API:**
 
-| Method | Description |
-|--------|-------------|
-| `komponentor.root(host, urlOrOpts)` | Set app root: mount one component, replace previous root. |
-| `komponentor.mount(host, urlOrOpts)` | Mount a component on `host` (load HTML from URL, render, optional init). Options: `replaceHost: true` to replace host with component root. |
-| `komponentor.scan(container?, { parent?, replaceExisting? })` | Find all `[data-komponent]` in `container` and mount each. |
-| `komponentor.route({ outlet, routes, notFound })` | Configure and start hash router. |
-| `komponentor.navigate(hash)` | Set `location.hash` (triggers route). |
-| `komponentor.intent(urlOrOpts)` | Fluent builder for a **headless intent** (no DOM, no render). `.data(...).send({ parent })` → Intent. |
-| `komponentor.runIntent(url, data, { parent })` | Convenience: create and run an intent; returns the Intent instance. |
+
+| Method                                                            | Description                                                                                                       |
+| ----------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
+| `komponentor.root(host, urlOrOpts)`                               | Set app root: mount one component, replace previous root. Returns `**Promise<Komponent>`**.                       |
+| `komponentor.mount(host, urlOrOpts)`                              | Mount a component on `host`. Returns `**Promise<Komponent>**` (awaits load, render, init).                        |
+| `komponentor.unmount(host)`                                       | Destroy the komponent on `host`, if any. Returns `boolean`.                                                       |
+| `komponentor.scan(container?, { parent?, replaceExisting? })`     | Find all `[data-komponent]` in `container` (default `body`) and mount each.                                       |
+| `komponentor.route({ mode?, outlet, routes, notFound, ignore? })` | Configure and start router (`mode`: `"hash"` default or `"history"`).                                             |
+| `komponentor.navigate(pathOrHash, navOpts?)`                      | Hash mode: set `location.hash`. History mode: `pushState` / `replaceState` then dispatch.                         |
+| `komponentor.intent(urlOrOpts)`                                   | Fluent builder for an **intent** (temporary UI). `.data(...).send({ parent?, outlet? })` → `**Promise<Intent>`**. |
+| `komponentor.runIntent(url, data, { parent?, outlet? })`          | Convenience: run an intent; returns `**Promise<Intent>**`.                                                        |
+
 
 No build step. **jQuery is required** — load it before `komponentor.js` (see [komponentor.md](./komponentor.md)).
+
+**Security:** Only load component HTML from paths you trust; scripts in components run in the page. See **[SECURITY.md](./SECURITY.md)**.
 
 ---
 
@@ -72,11 +78,10 @@ komponentor.mount("#app", "components/welcome.html");
 With options:
 
 ```javascript
-komponentor.mount("#app", {
+await komponentor.mount("#app", {
   url: "components/panel.html",
   data: { title: "Hello", id: 42 },
-  replace: true,
-  replaceHost: false,  // set true to replace the host element with the component root (see docs/komponentor.md)
+  replaceHost: false,  // true = swap host for component root (see docs/komponentor.md)
   autoload: true,
   overlay: true,
 });
@@ -89,35 +94,37 @@ komponentor.mount("#app", {
 komponentor.mount("#app", "components/user.html|id=5|tab=profile");
 ```
 
-`mount()` returns the **Komponent** instance immediately; loading is async. To wait for it:
+`komponentor.mount()` is **async** and resolves when load, render, and `init_komponent` finish:
 
 ```javascript
-const k = komponentor.mount("#app", "components/welcome.html");
-await k.mount();  // wait for load + render + init
+const k = await komponentor.mount("#app", "components/welcome.html");
+// k.ctx.ready === true; k.readyPromise also resolves to k
 ```
+
+To remount an existing instance on the same host: `await k.mount()`.
 
 ### 3.2 Set the app root
 
 Use `root()` when you have a single top-level component and want to replace it on route change or re-init:
 
 ```javascript
-komponentor.root("#app", "components/main.html");
+await komponentor.root("#app", "components/main.html");
 ```
 
 This stores the component as the “root”; you can use `emitRoot()` from any child context to send events to the root (see Advanced).
 
 ### 3.2a Replace host option
 
-Use **`replaceHost: true`** in mount options to **replace** the host element with the component’s root (the host is removed from the DOM; the component’s first top-level element takes its place). The host’s `id` is copied to the new root so selectors (e.g. `#app` for the router outlet) still work. On destroy, the component root is removed from the DOM. See **docs/komponentor.md** for full implications (remount, router, fallback when host has no parent).
+Use `**replaceHost: true**` in mount options to **replace** the host element with the component’s root (the host is removed from the DOM; the component’s first top-level element takes its place). The host’s `id` is copied to the new root so selectors (e.g. `#app` for the router outlet) still work. On destroy, the component root is removed from the DOM. See **docs/komponentor.md** for full implications (remount, router, fallback when host has no parent).
 
 ### 3.3 Component HTML and init
 
 Each component is an **HTML file** that can contain:
 
 - **Markup** – Any HTML. It’s parsed and inserted into the host (scripts are stripped and run in isolation).
-- **Script** – Optional. Define **`init_komponent(komponent, data)`** (or assign it). It runs after the HTML is rendered, with:
-  - **`komponent`** – The Komponent instance.
-  - **`data`** – The `data` object passed at mount (or from `url|key=val`).
+- **Script** – Optional. Define `**init_komponent(k, data)`**. Script bodies are executed via `new Function` (trusted code only; see [SECURITY.md](./SECURITY.md)). Runs after markup is inserted, with:
+  - `**k**` – The **Komponent** or **Intent** instance (`k.find` returns jQuery).
+  - `**data`** – The `data` object passed at mount (or from `url|key=val`), plus `**data.route**` when mounted by the router.
 
 Example component: `components/panel.html`
 
@@ -128,8 +135,8 @@ Example component: `components/panel.html`
 </div>
 <script>
   function init_komponent(komponent, data) {
-    komponent.find(".panel-title").textContent = data.title || "Untitled";
-    komponent.find(".panel-body").textContent = data.body || "";
+    komponent.find(".panel-title").text(data.title || "Untitled");
+    komponent.find(".panel-body").text(data.body || "");
     komponent.ctx.on("custom:event", function (payload) {
       console.log("Received", payload);
     });
@@ -143,16 +150,16 @@ Example component: `components/panel.html`
 - `komponent.ctx` – **Context** (lifecycle, events, request).
 - `komponent.url`, `komponent.data` – URL and data.
 - `komponent.parent` / `komponent.children` – Parent/children in the tree.
-- `komponent.find(selector)` – `hostEl.querySelector(selector)`.
-- `komponent.findAll(selector)` – `Array.from(hostEl.querySelectorAll(selector))`.
-- `komponent.mount()` – (Re-)run mount (async).
+- `komponent.find(selector)` – jQuery search inside the host (`$host.find(selector)`).
+- `komponent.mount()` – (Re-)run fetch/render/init on this instance; returns `Promise<this>`.
+- `komponent.readyPromise` – resolves to this komponent when ready (or rejects on error).
 - `komponent.scan({ replaceExisting })` – Scan inside host for `data-komponent`.
 - `komponent.destroy()` – Destroy this component and its children.
 
 **Context (`komponent.ctx`):**
 
 - `ctx.on(event, fn, ctx)` / `ctx.off(event, fn, ctx)` / `ctx.trigger(event, payload)` – Scoped events.
-- `ctx.state` – `"initial"` | `"loading"` | `"rendering"` | `"init"` | `"ready"` | `"error"` | `"destroying"` | `"destroyed"`.
+- `ctx.state` – `"initial"` | `"loading"` | `"loaded"` | `"mounting"` | `"mounted"` | `"initializing"` | `"ready"` | `"error"` | `"closing"` (intent) | `"destroying"` | `"destroyed"`.
 - `ctx.onDestroy(fn)` – Run `fn(ctx)` on destroy (reverse order).
 - `ctx.requestText(url, fetchOpts)` – Fetch text with abort-on-destroy and stale guard (returns `Promise<string|null>`).
 - `ctx.emitUp(event, payload)` – Trigger event on this context and each parent up the tree.
@@ -162,7 +169,7 @@ Example component: `components/panel.html`
 
 ## 4. Scan and `data-komponent` markers
 
-You can declare child components in HTML with the **`data-komponent`** attribute. Format: **`url|key=value|...`**.
+You can declare child components in HTML with the `**data-komponent`** attribute. Format: `**url|key=value|...**`.
 
 Example:
 
@@ -189,16 +196,19 @@ komponentor.scan("#app", {
 });
 ```
 
-If you mounted a parent with **`autoload: true`** (default), that parent will **automatically** call `scan()` on its host after it becomes ready, so nested `data-komponent` placeholders inside the fetched HTML are mounted as children.
+If you mounted a parent with `**autoload: true**` (default), that parent will **automatically** call `scan()` on its host after it becomes ready, so nested `data-komponent` placeholders inside the fetched HTML are mounted as children.
 
 ---
 
-## 5. Hash router
+## 5. Router (hash and history)
 
-Use the router to mount different components in an outlet based on the hash.
+Use the router to mount different components in an **outlet** when the URL changes.
+
+**Hash mode** (default) — paths in `location.hash`:
 
 ```javascript
 komponentor.route({
+  mode: "hash",  // optional; default
   outlet: "#app",
   routes: {
     "#/": "components/home.html",
@@ -210,9 +220,9 @@ komponentor.route({
 });
 ```
 
-- **`outlet`** – Selector (or element) where the route component is mounted.
-- **`routes`** – Object: hash pattern → **component URL (string)** or **callback(outletEl, route)**. Patterns like `#/users/:id` produce **params**. If the value is a function, it is called with the outlet element and `{ hash, params }`; you can then call `komponentor.mount(outletEl, ...)` with custom options or run any logic.
-- **`notFound`** – URL (string) or callback(outletEl, route) when no route matches.
+- `**outlet**` – Selector (or element) where the route component is mounted.
+- `**routes**` – Object: hash pattern → **component URL (string)** or **callback(outletEl, route)**. Patterns like `#/users/:id` produce **params**. If the value is a function, it is called with the outlet element and `{ hash, params }`; you can then call `komponentor.mount(outletEl, ...)` with custom options or run any logic.
+- `**notFound`** – URL (string) or callback(outletEl, route) when no route matches.
 
 Navigate programmatically:
 
@@ -220,10 +230,25 @@ Navigate programmatically:
 komponentor.navigate("#/users/42");
 ```
 
-In the mounted component, **`data.route`** is set by the router:
+**History mode** — paths in `location.pathname` (patterns without `#` prefix, e.g. `"/users/:id"`):
 
-- `data.route.hash` – e.g. `"#/users/42"`.
-- `data.route.params` – e.g. `{ id: "42" }`.
+```javascript
+komponentor.route({
+  mode: "history",
+  outlet: "#app",
+  routes: {
+    "/": "components/home.html",
+    "/users/:id": "components/user-detail.html",
+  },
+});
+komponentor.navigate("/users/42");
+komponentor.navigate("/users/42", { replace: true });  // replaceState
+```
+
+In the mounted component, `**data.route**` is set by the router:
+
+- Hash mode: `data.route.hash` (e.g. `"#/users/42"`), `data.route.params` (e.g. `{ id: "42" }`).
+- History mode: `data.route.path`, `data.route.search`, `data.route.params`.
 
 Example component for `#/users/:id`:
 
@@ -234,7 +259,7 @@ Example component for `#/users/:id`:
 <script>
   function init_komponent(komponent, data) {
     const id = data.route && data.route.params && data.route.params.id;
-    komponent.find(".user-id").textContent = id || "—";
+    komponent.find(".user-id").text(id || "—");
   }
 </script>
 ```
@@ -253,9 +278,9 @@ Nested components are the norm: a parent’s HTML contains placeholders with `da
 
 So you get:
 
-- **`komponent.parent`** – Parent Komponent (or `null`).
-- **`komponent.children`** – Array of child Komponents.
-- **`komponent.ctx.parent`** / **`komponent.ctx.children`** – Same structure at the Context level.
+- `**komponent.parent`** – Parent Komponent (or `null`).
+- `**komponent.children**` – Array of child Komponents.
+- `**komponent.ctx.parent**` / `**komponent.ctx.children**` – Same structure at the Context level.
 
 Destroying a component destroys all of its children first, then clears the host content.
 
@@ -286,24 +311,21 @@ function init_komponent(komponent, data) {
 
 ### 6.3 Events up and to root
 
-- **`ctx.emitUp(event, payload)`** – Fires `event` on this context, then on `ctx.parent`, then its parent, and so on. Useful for “something happened in a child, notify ancestors.”
-- **`ctx.emitRoot(event, payload)`** – Fires the event on the **root context** only (the one set with `komponentor.root()`). Use for app-level notifications (e.g. “open sidebar”, “show toast”).
+- `**ctx.emitUp(event, payload)**` – Fires `event` on this context, then on `ctx.parent`, then its parent, and so on. Useful for “something happened in a child, notify ancestors.”
+- `**ctx.emitRoot(event, payload)**` – Fires the event on the **root context** only (the one set with `komponentor.root()`). Use for app-level notifications (e.g. “open sidebar”, “show toast”).
 
 Example: child notifies parent and root.
 
 In a child component:
 
 ```javascript
-function init_komponent(komponent, data) {
-  const btn = komponent.find("button.report");
-  if (btn) {
-    btn.addEventListener("click", function () {
+  function init_komponent(komponent, data) {
+    komponent.find("button.report").on("click", function () {
       komponent.ctx.trigger("child:clicked", { id: data.id });
       komponent.ctx.emitUp("child:clicked", { id: data.id });
       komponent.ctx.emitRoot("notify", { message: "Child " + data.id + " clicked" });
     });
   }
-}
 ```
 
 In a parent or root component you can subscribe:
@@ -328,7 +350,7 @@ komponent.ctx.on("child:clicked", function (payload) {
 <script src="komponentor.js"></script>
 <script>
   komponentor.config.baseUrl = "./";
-  komponentor.root("#app", "components/shell.html");
+  await komponentor.root("#app", "components/shell.html");
 </script>
 ```
 
@@ -381,8 +403,8 @@ komponent.ctx.on("child:clicked", function (payload) {
 </div>
 <script>
   function init_komponent(komponent, data) {
-    komponent.find(".card-title").textContent = data.title || "Card";
-    komponent.find(".card-action").addEventListener("click", function () {
+    komponent.find(".card-title").text(data.title || "Card");
+    komponent.find(".card-action").on("click", function () {
       komponent.ctx.emitUp("child:clicked", { id: data.id });
       komponent.ctx.emitRoot("notify", { message: "Card " + data.id + " action" });
     });
@@ -407,7 +429,7 @@ function init_komponent(komponent, data) {
   if (!container) return;
   const placeholder = document.createElement("div");
   container.appendChild(placeholder);
-  komponent.manager.mount(placeholder, {
+  await komponent.manager.mount(placeholder, {
     url: "components/widget.html",
     data: { source: data.source },
     parent: komponent,
@@ -418,103 +440,107 @@ function init_komponent(komponent, data) {
 
 Here `komponent.manager` is the **Komponentor** instance. The new component is attached as a child of `komponent` because of `parent: komponent`.
 
-### 6.6 Intents (headless: no DOM, no render)
+### 6.6 Intents (temporary UI: modals, dialogs)
 
-An **Intent** loads an HTML file and runs its init script **without** attaching to a DOM node. No rendering, no overlay, no `data-komponent` bindings. Data comes only from the URL spec (`url|key=val`) and from programmatic `.data()` or arguments. Intents can be part of the component tree (when created with a **parent**), so they are destroyed when the parent is destroyed.
+An **Intent** loads component HTML and mounts it into an **outlet** (default `"body"`) inside a wrapper element. Use intents for modals, dialogs, and other UI that should be removed when dismissed. The init function receives `**(intent, data)`** where `intent` is the Intent instance (same `init_komponent` name as komponents).
+
+- `**intent.find(selector)**` — jQuery search inside the intent wrapper.
+- `**intent.close(result?)**` — remove DOM, resolve `**resultPromise**`, destroy context.
+- `**intent.readyPromise**` / `**intent.resultPromise**` — await ready or user result.
+- Pass `**parent: komponent**` so the intent is destroyed when the parent komponent is destroyed.
 
 **Fluent API:**
 
 ```javascript
-// Build URL + data, then run. Returns the Intent instance (after run).
 const intent = await komponentor.intent("modals/confirm.html|action=delete")
   .data({ id: 42, title: "Delete item?" })
-  .send({ parent: komponent });  // optional: attach to component tree
+  .send({ parent: komponent, outlet: "body" });
+await intent.readyPromise;
+const result = await intent.resultPromise;  // after intent.close(...)
 ```
 
 **Convenience:**
 
 ```javascript
-const intent = await komponentor.runIntent("services/sync.html", { task: "full" });
+const intent = await komponentor.runIntent("modals/confirm.html", { task: "full" }, { parent: k });
 ```
 
-**Intent instance:** `intent.url`, `intent.data`, `intent.ctx` (Context: `on`, `trigger`, `requestText`, `onDestroy`, `state`, `ready`). The init function in the intent’s HTML receives `(intent, data)` and can, for example, call `komponentor.mount(el, ...)` to attach UI elsewhere.
+#### Example: Modal intent (see also [docs/demo/about.html](demo/about.html))
 
-#### Example 1: Intent from a component (part of the tree)
-
-Use an intent as a child of a component so it is torn down when the component is destroyed (e.g. when leaving the route).
+**In a komponent** — open modal on click:
 
 ```javascript
-// Inside a component's init_komponent(komponent, data)
 async function init_komponent(komponent, data) {
-  const openModalBtn = komponent.find("#open-modal");
-  openModalBtn.addEventListener("click", async function () {
-    const i = await komponentor.intent("modals/dialog.html|title=Confirm")
-      .data({ message: "Continue?", source: komponent })
+  komponent.find("#open-modal").on("click", () => {
+    komponentor.intent("modals/theme.html")
+      .data("theme", komponent.data.theme)
       .send({ parent: komponent });
-    // i.ctx.ready; i.data. Dialog's init may call komponentor.mount(outlet, ...) to show UI.
-    // When komponent is destroyed, this intent is destroyed too (cascade).
   });
 }
 ```
 
-**modals/dialog.html** (no host element; init runs with the Intent instance):
+**modals/theme.html** — markup + init; show Bootstrap modal, close on dismiss:
 
 ```html
+<div class="modal" tabindex="-1">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-body">…</div>
+    </div>
+  </div>
+</div>
 <script>
   function init_komponent(intent, data) {
-    // intent is the Intent instance; intent.manager is Komponentor
-    const outlet = document.getElementById("modal-outlet");
-    if (outlet) {
-      intent.manager.mount(outlet, {
-        url: "modals/dialog-view.html",
-        data: data,
-        parent: null,
-      });
-    }
+    const $modal = intent.find(".modal");
+    $modal.on("hidden.bs.modal", () => intent.close());
+    new bootstrap.Modal($modal[0]).show();
   }
 </script>
 ```
 
-#### Example 2: Global intent (no parent)
+#### Example: Intent without parent
 
-Run a headless script that is not attached to any component tree (e.g. a background task or one-off setup).
-
-```javascript
-// No parent: intent is not in any tree; you manage its lifecycle yourself.
-const intent = await komponentor.runIntent("services/analytics.html", {
-  event: "pageview",
-  path: location.pathname,
-});
-// intent.ctx.ready; use or store intent reference; call intent.destroy() when done.
-```
+No `parent` — not tied to the komponent tree; call `**intent.close()**` or `**intent.destroy()**` yourself when done.
 
 ---
 
 ### 6.7 Rescan / replace children
 
-By default, **scan** runs only once per component (on first load). To allow re-scanning and replacing existing child components:
+By default, each komponent **scans its host only once** after mount (`_scanned` flag). To replace existing child komponents:
 
-- When calling **scan** manually: `komponentor.scan(container, { parent: k, replaceExisting: true })`.
-- For the automatic scan after mount, the component option **`replaceExistingChildren`** is not in the default opts; the single-file implementation uses **`opts.autoload !== false`** and **`opts.replaceExistingChildren === true`** to decide whether to pass `replaceExisting: true` to scan. So when creating a component (e.g. via `manager.mount` with opts), you can pass `replaceExistingChildren: true` if you want its automatic scan to replace existing children.
+- **Manual scan:** `komponentor.scan(container, { parent: k, replaceExisting: true })` or `komponent.scan({ replaceExisting: true })`.
+- **Automatic scan after mount:** pass `**replaceExistingChildren: true`** in mount options so autoload calls `scan({ replaceExisting: true })`:
+
+```javascript
+await komponentor.mount(host, {
+  url: "parent.html",
+  replaceExistingChildren: true,
+});
+```
 
 ---
 
 ## 7. Quick reference
 
-| Goal | Use |
-|------|-----|
-| Mount one component | `komponentor.mount(host, urlOrOpts)` |
-| Set app root (replace on re-root) | `komponentor.root(host, urlOrOpts)` |
-| Mount from markers in DOM | `komponentor.scan(container?, { parent?, replaceExisting? })` |
-| Hash routing | `komponentor.route({ outlet, routes, notFound })`, `komponentor.navigate(hash)` |
-| Headless intent (no DOM) | `komponentor.intent(urlOrOpts).data(...).send({ parent? })`, `komponentor.runIntent(url, data, { parent? })` |
-| In component: DOM query | `komponent.find(selector)`, `komponent.findAll(selector)` |
-| In component: events | `komponent.ctx.on` / `off` / `trigger` |
-| In component: bubble to ancestors | `komponent.ctx.emitUp(event, payload)` |
-| In component: notify root | `komponent.ctx.emitRoot(event, payload)` |
-| In component: fetch | `komponent.ctx.requestText(url, fetchOpts)` |
-| In component: cleanup | `komponent.ctx.onDestroy(fn)` |
-| Nested placeholders | Put `data-komponent="url|key=val"` in HTML; use autoload or call `scan()` |
-| Intent in tree (destroy with parent) | Pass `parent: komponent` to `.send({ parent })` or `runIntent(..., { parent })` |
+
+| Goal                                 | Use                                                                                   |
+| ------------------------------------ | ------------------------------------------------------------------------------------- |
+| Mount one component                  | `await komponentor.mount(host, urlOrOpts)`                                            |
+| Set app root (replace on re-root)    | `await komponentor.root(host, urlOrOpts)`                                             |
+| Unmount by host                      | `komponentor.unmount(host)`                                                           |
+| Mount from markers in DOM            | `komponentor.scan(container?, { parent?, replaceExisting? })`                         |
+| Routing                              | `komponentor.route({ mode?, outlet, routes, notFound })`, `komponentor.navigate(...)` |
+| Modal / temporary UI                 | `await komponentor.intent(...).send({ parent?, outlet? })`, `intent.close(result)`    |
+| In component: DOM query              | `komponent.find(selector)` (jQuery)                                                   |
+| In component: events                 | `komponent.ctx.on` / `off` / `trigger`                                                |
+| In component: bubble to ancestors    | `komponent.ctx.emitUp(event, payload)`                                                |
+| In component: notify root            | `komponent.ctx.emitRoot(event, payload)`                                              |
+| In component: fetch                  | `komponent.ctx.requestText(url, fetchOpts)`                                           |
+| In component: cleanup                | `komponent.ctx.onDestroy(fn)`                                                         |
+| Nested placeholders                  | Put `data-komponent="url                                                              |
+| Intent in tree (destroy with parent) | Pass `parent: komponent` to `.send({ parent })` or `runIntent(..., { parent })`       |
+
 
 For a runnable walkthrough, see **[docs/demo/](demo/)** (router, intent, shared `KModel`).
+
+For trust boundaries, XSS, CSP, and safe URLs/templates, see **[SECURITY.md](./SECURITY.md)**.

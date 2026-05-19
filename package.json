@@ -12,7 +12,8 @@
     "build": "node build.mjs",
     "watch": "node build.mjs --watch",
     "prepublishOnly": "npm run build",
-    "demo": "npx --yes serve docs/demo -l 3000"
+    "demo": "npx --yes serve docs/demo -l 3000",
+    "release": "node scripts/release.mjs"
   },
   "keywords": [
     "jquery",

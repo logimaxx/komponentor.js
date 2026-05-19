@@ -17,7 +17,7 @@
             <ul class="mb-2">
                 <li><code>app.html</code> — shell: shared theme model, hash router on <code>#view</code>, opens the modal intent</li>
                 <li><code>list.html</code> / <code>item.html</code> — routed into <code>#view</code> (<code>#/</code> and <code>#/item/:id</code>)</li>
-                <li><code>about.html</code> — headless intent (modal); receives the same <code>KModel</code> via <code>.data("theme", …)</code></li>
+                <li><code>about.html</code> — intent (modal); shares the same <code>KModel</code> via <code>.data("theme", …)</code></li>
             </ul>
             <p class="mb-2 fw-semibold text-body">Try this</p>
             <ol class="mb-0">
@@ -28,6 +28,11 @@
         </div>
     </details>
     <div id="app" data-komponent="app.html"></div>
+    <footer class="mt-4 pt-3 border-top small text-muted text-center">
+        <a href="https://logimaxx.ro">Logimaxx Systems</a>
+        ·
+        <a href="https://www.linkedin.com/in/sergiu-voicu-88615010">Sergiu Voicu</a>
+    </footer>
     <script src="../../dist/komponentor.js"></script>
     <script src="../../dist/ksimpleviews.js"></script>
     <script>

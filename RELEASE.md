@@ -1,39 +1,43 @@
-# Release checklist
+# Release
 
-Use this before tagging and publishing **komponentor** on npm/GitHub.
+## One command
 
-## 1. Version and changelog
+1. Edit **[CHANGELOG.md](CHANGELOG.md)** under `## [Unreleased]` (what changed).
+2. Commit those changes on `main`.
+3. Run:
 
-- [ ] Bump `version` in `package.json` (semver).
-- [ ] Add a dated section under `CHANGELOG.md` with changes.
-- [ ] Run `npm run build` and commit updated `dist/` if anything changed in `src/`.
+```bash
+npm run release -- patch
+```
 
-## 2. Quality
+Use `patch`, `minor`, or `major` (semver).
 
-- [ ] `npm run build` completes without errors.
-- [ ] Open the demo: `npm run demo` → http://localhost:3000 — click through routes, intent, theme color.
-- [ ] `npm pack --dry-run` — confirm only `dist/`, `LICENSE`, `README.md` are included.
+The script will:
 
-## 3. Git
+- Move `[Unreleased]` → `[x.y.z] - date` in the changelog
+- Bump `package.json`
+- Run `npm run build` (updates `dist/` banners)
+- Create git commit `Release x.y.z` and tag `x.y.z`
 
-- [ ] `git status` clean (or only intended release files).
-- [ ] Commit: `git commit -m "Release 1.2.0"`.
-- [ ] Tag: `git tag -a 1.2.0 -m "1.2.0"` (same style as existing `1.0.0`, `1.1.0` tags).
-- [ ] Push: `git push && git push origin 1.2.0`.
+Then publish:
 
-## 4. npm
+```bash
+git push && git push origin x.y.z
+npm publish
+```
 
-- [ ] Logged in: `npm whoami`.
-- [ ] First publish: `npm publish`.
-- [ ] Verify on https://www.npmjs.com/package/komponentor
+Optional: [GitHub Release](https://github.com/vsergione/komponentor.js/releases/new) — paste the new changelog section.
 
-## 5. GitHub
+## Other commands
 
-- [ ] Create a [GitHub Release](https://github.com/vsergione/komponentor.js/releases) from tag `1.2.0`; paste the `CHANGELOG` section for 1.2.0.
+| Command | Purpose |
+|---------|---------|
+| `npm run build` | Build `dist/` |
+| `npm run demo` | Serve `docs/demo/` on port 3000 |
+| `npm pack --dry-run` | Preview npm package contents |
 
 ## Notes
 
-- **jQuery** is a `peerDependency` — consumers must load jQuery before Komponentor.
-- Published package contains **built** `dist/` only (not `src/` or `docs/`).
-- Demo and full docs stay in the git repo under `docs/`.
-- Git tags `1.0.0` / `1.1.0` are historical; **1.2.0** is the first npm release.
+- Git tags use **`1.2.0`** (no `v` prefix) — see `.npmrc`.
+- `npm publish` runs `prepublishOnly` → build again before upload.
+- Only `dist/`, `LICENSE`, and `README.md` are published to npm.

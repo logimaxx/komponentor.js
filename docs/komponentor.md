@@ -1,6 +1,6 @@
 # Komponentor
 
-Komponentor is an internal JavaScript runtime for loading HTML components by URL, managing a tree of components (lifecycle, destroy cascade), temporary UI (Intents: modals, dialogs), and optional hash-based routing.
+Komponentor is a lightweight JavaScript runtime for loading HTML components by URL, managing a tree of components (lifecycle, destroy cascade), temporary UI (Intents: modals, dialogs), and optional hash- or history-based routing.
 
 **File:** `src/komponentor.js`  
 **Dependencies:** jQuery (required).
@@ -33,9 +33,13 @@ komponentor.config.baseUrl = "/api";   // prepended to URLs starting with /
 komponentor.config.markerAttr = "data-komponent";
 komponentor.config.overlayClass = "komponent-overlay";
 komponentor.config.overlayHtml = "<div>Loading</div>";
-komponentor.config.errorHtml = (url, err) => `<div>Failed: ${url}</div>`;
+komponentor.config.errorHtml = (url, err) => {
+  return $("<div class='komponent-error'>").text("Failed: " + String(url))[0].outerHTML;
+};
 komponentor.config.fetchOptions = {};  // optional; passed to fetch() for component and intent requests
 ```
+
+See **[SECURITY.md](./SECURITY.md)** for trust boundaries, XSS, CSP, and safe use of URLs and templates.
 
 ---
 
@@ -61,11 +65,23 @@ Declare child components in HTML:
 |--------|-------------|
 | `url` | Component HTML URL (or spec with `|key=val`). |
 | `data` | Object merged with parsed spec/attributes, passed to `init_komponent(k, data)`. |
-| `replace` | If true, destroy existing component on same host before mounting. |
-| `replaceHost` | If true, **replace** the host element with the component root (host is removed from DOM). See implications below. |
+| `replaceHost` | If true, **swap** the host placeholder for the component’s single root element in the DOM (host removed; its `id` copied). See implications below. |
+
+Mounting always destroys any existing komponent on the same host before loading a new one (no separate `replace` flag).
 | `autoload` | If true (default), scan for `data-komponent` children after mount. |
 | `overlay` | If true (default), show loading overlay during fetch. |
 | `parent` | Komponent or Intent instance; new component is attached as child. |
+
+### `replaceHost` vs normal mount
+
+| | Normal mount (`replaceHost: false`) | `replaceHost: true` |
+|---|-------------------------------------|---------------------|
+| **Placeholder element** | Stays in the DOM (e.g. `<div id="app">`) | Removed; component root takes its place |
+| **Content** | Cleared, then component HTML appended inside host | Host swapped for one top-level element from the template |
+| **On destroy** | Host remains; inner HTML cleared | Component root removed from DOM |
+| **Typical use** | Outlets, nested `data-komponent` hosts | Root shell where `#app` should become the component element |
+
+Not related to **`komponentor.navigate(..., { replace: true })`** — that only affects browser history (`replaceState`), not mount options.
 
 ### Implications of `replaceHost: true`
 
@@ -91,8 +107,7 @@ Each mounted component is a **Komponent** with:
 
 **Methods:**
 
-- **`find(selector)`** - `hostEl.querySelector(selector)`.
-- **`findAll(selector)`** - `hostEl.querySelectorAll(selector)` as array.
+- **`find(selector)`** - jQuery: `$host.find(selector)`.
 - **`mount()`** - Run mount (fetch, render, init). Returns a Promise; usually called internally.
 - **`scan({ replaceExisting })`** - Scan this component’s host for `data-komponent` and mount children (once per lifetime unless `replaceExisting: true`).
 - **`remount()`** - Destroy this component and mount a fresh one on the same host.
@@ -181,7 +196,7 @@ komponentor.route({
     "#/users/:id": "user.html",
     "#/custom": (outletEl, route) => {
       // route = { hash, params }; mount or run custom logic
-      komponentor.mount(outletEl, { url: "custom.html", data: { route }, replace: true });
+      komponentor.mount(outletEl, { url: "custom.html", data: { route } });
     }
   },
   notFound: "404.html"      // optional; can be a URL string or callback(outletEl, route)
@@ -190,7 +205,7 @@ komponentor.route({
 
 - **Routes** are matched by hash (e.g. `#/users/5`). Pattern `:id` captures one segment.
 - Each route value can be:
-  - **URL string** – The manager mounts that component in the outlet with `data: { route: { hash, params } }` and `replace: true`.
+  - **URL string** – The manager mounts that component in the outlet with `data: { route: { hash, params } }` (any previous komponent on the outlet is destroyed first).
   - **Callback** – `(outletEl, route) => void`. You can call `komponentor.mount(outletEl, ...)` with custom options, or run any logic. `route` is `{ hash, params }`.
 - **notFound** – Optional. Either a URL string (mount that component) or a callback `(outletEl, route)` where `route` has `params: {}`.
 - **`komponentor.navigate(hash)`** – Sets `location.hash` (handler runs on `hashchange`).
@@ -214,6 +229,21 @@ For advanced use, the following are attached to `komponentor`:
 1. jQuery (required; global `jQuery` or `$`, `>=1.9.0`).
 2. `komponentor.js`.
 
+---
+
+## Security
+
+Komponentor **executes** `<script>` bodies from fetched component HTML (`new Function`) and inserts markup with jQuery. Only load components you trust.
+
+| Risk | Guidance |
+|------|----------|
+| Untrusted component URLs | Allowlist paths; do not pass user/query input as `url`. |
+| Untrusted HTML | Not supported; components are trusted application code. |
+| XSS in markup / `errorHtml` | Escape output; override `errorHtml` safely (see config above). |
+| Route `data.route.params` | Treat as untrusted strings when rendering. |
+| CSP | Component scripts need `'unsafe-eval'`; see [SECURITY.md](./SECURITY.md). |
+
+Full details: **[SECURITY.md](./SECURITY.md)**.
 
 ---
 

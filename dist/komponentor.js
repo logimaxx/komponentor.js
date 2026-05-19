@@ -6,7 +6,7 @@
 
 (() => {
   /*!
-   * Komponentor (single-file) — internal rapid-development runtime
+   * Komponentor (single-file) — lightweight rapid-development runtime
    * - Komponent: persistent UI, tree (parent/children), scan, destroy cascade
    * - Intent: temporary UI only (modal, dialog, popup); mounts into outlet, close/destroy unmounts
    * - Shared load pipeline (resolve → fetch → parse → init) for both
@@ -361,7 +361,7 @@
       async remount() {
         if (this._destroyed) return this;
         this.destroy();
-        return this.manager.mount(this.$host, Object.assign({}, this.opts, { replace: true }));
+        return this.manager.mount(this.$host, this.opts);
       }
       /** Destroy children, context, and clear/replace host per `replaceHost` / normal empty. */
       destroy() {
@@ -649,7 +649,6 @@
                     await this.manager.mount(outletEl, {
                       url: this.notFound,
                       data: { route },
-                      replace: true,
                       parent: null
                     });
                   }
@@ -662,7 +661,6 @@
                 await this.manager.mount(outletEl, {
                   url: match.handler,
                   data: { route: match.route },
-                  replace: true,
                   parent: null
                 });
               }
@@ -782,7 +780,6 @@
                   await this.manager.mount(outletEl, {
                     url: this.notFound,
                     data: { route },
-                    replace: true,
                     parent: null
                   });
                 }
@@ -795,7 +792,6 @@
               await this.manager.mount(outletEl, {
                 url: match.handler,
                 data: { route: match.route },
-                replace: true,
                 parent: null
               });
             }
@@ -930,16 +926,15 @@
       /** Normalize mount options string/object; merges `url|k=v` into `data`; applies route overlay rule. */
       _normalizeOpts(opts) {
         if (typeof opts === "string") {
-          return { url: opts, data: {}, replace: false, autoload: true, overlay: true };
+          return { url: opts, data: {}, autoload: true, overlay: true };
         }
         if (!isPlainObject(opts)) {
-          return { url: "", data: {}, replace: false, autoload: true, overlay: true };
+          return { url: "", data: {}, autoload: true, overlay: true };
         }
         const o = Object.assign(
           {
             url: "",
             data: {},
-            replace: false,
             replaceHost: false,
             // if true, replace the host element with the component root (see docs)
             autoload: true,
@@ -1143,7 +1138,7 @@
           this._root = null;
           this._rootCtx = null;
         }
-        const k = await this.mount($host, Object.assign({}, this._normalizeOpts(urlOrOpts), { replace: true, parent: null }));
+        const k = await this.mount($host, Object.assign({}, this._normalizeOpts(urlOrOpts), { parent: null }));
         this._root = k;
         this._rootCtx = k && k.ctx ? k.ctx : null;
         return k;
@@ -1156,8 +1151,9 @@
         const $host = normalizeHost(host);
         const opts = this._normalizeOpts(urlOrOpts);
         const existing = this.getInst($host);
-        if (existing && existing instanceof Komponent && opts.replace) existing.destroy();
-        if (existing && !opts.replace) return existing;
+        if (existing && existing instanceof Komponent && !existing._destroyed) {
+          existing.destroy();
+        }
         const lockToken = {};
         if (!this.lockHost($host, lockToken)) {
           const cur = this.getInst($host);
@@ -1209,8 +1205,7 @@
           void this.mount($node, {
             url: parsed.url,
             data,
-            parent,
-            replace: true
+            parent
           });
         }.bind(this));
       }

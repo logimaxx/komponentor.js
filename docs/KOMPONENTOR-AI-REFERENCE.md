@@ -2,27 +2,30 @@
 
 This document is the **canonical reference** for the Komponentor library. Use it as context when generating or modifying code that uses Komponentor.
 
+**Related docs:** [HOW-TO-GUIDE.md](./HOW-TO-GUIDE.md) (tutorial), [komponentor.md](./komponentor.md), [ksimpleviews.md](./ksimpleviews.md), [SECURITY.md](./SECURITY.md).
+
 ---
 
 ## 1. Purpose and scope
 
-- **Komponentor** is an **internal** JavaScript runtime for:
+- **Komponentor** is a **lightweight** JavaScript runtime for:
   - **Component lifecycle**: load HTML by URL, parse, run init, mount into a host element.
   - **Persistent UI**: components live in a tree (parent/children), support local scan and destroy cascade.
   - **Temporary UI**: Intents (modals, dialogs, popups) mount into an outlet and unmount on close.
-  - **Routing**: optional hash-based router that mounts components into an outlet.
+  - **Routing**: optional **hash** or **history** router that mounts components into an outlet.
 - **Not** a general-purpose framework. It does **not** handle:
   - Templating or data-binding (that is **KViews** / KModel / KView).
   - Public plugin ecosystems; no formal extension API.
 - **Dependencies**: **jQuery is required** (global `jQuery` or `$`).
 - **Typical stack**: Komponentor (lifecycle, loading, mount, routing, temporary UI) + **KViews** (view/data-binding). Keep responsibilities separate.
+- **Security**: Component HTML is trusted code; `<script>` runs via `new Function`. Never mount user-controlled URLs or untrusted HTML. See **[SECURITY.md](./SECURITY.md)**.
 
 ---
 
 ## 2. Global entry point
 
 - **`komponentor`** — Single global instance (or the object you assign before the script runs; it is used as config and then replaced by the instance).
-- **Exposed classes** (on `komponentor`): `Komponentor`, `Komponent`, `Context`, `HashRouter`, `Intent`.
+- **Exposed classes** (on `komponentor`): `Komponentor`, `Komponent`, `Context`, `HashRouter`, `HistoryRouter`, `Intent`.
 
 ---
 
@@ -31,7 +34,7 @@ This document is the **canonical reference** for the Komponentor library. Use it
 | Concept | Description |
 |--------|-------------|
 | **Komponent** | Persistent UI node. Owns a host DOM element, has parent/children, participates in scan and destroy cascade. |
-| **Intent** | **Temporary UI only** (modal, dialog, popup). Mounts real DOM into an outlet (default `body`), has `close(result)` and `destroy()`; not part of the declarative scan tree. |
+| **Intent** | **Temporary UI only** (modal, dialog, popup). Mounts real DOM into an outlet (default `body`), has `close(result)` and `destroy()`. Not mounted via `data-komponent` scan; can be a **child in the tree** when created with `parent`. |
 | **Context** | Lifecycle and events for one Komponent or Intent. `k.ctx` — state, events, onDestroy, requestText, emitUp, emitRoot. |
 | **Scan** | Declarative: find elements with `data-komponent="url|key=val"` and mount components. Only for **persistent** components, not intents. |
 | **Host** | Normalized to a **jQuery collection** (selector string, DOM element, or jQuery set). Primary reference on instances is **`$host`**; **`hostEl`** = `$host[0]` when a raw DOM node is needed. |
@@ -49,9 +52,13 @@ komponentor.root(host, urlOrOpts)
 
 // Mount a component at host. Returns Promise<Komponent> (awaits load, render, init).
 komponentor.mount(host, urlOrOpts)
+
+// Destroy the komponent on host, if any (not for intents). Returns boolean.
+komponentor.unmount(host)
 ```
 
 - **host**: CSS selector string, DOM element, or jQuery collection; internally normalized to a jQuery collection.
+- **Mount behavior**: Always destroys an existing **Komponent** on the same host before loading a new one.
 - **urlOrOpts**: String (URL or spec `"url|key=val|..."`) or options object (see Mount options below).
 - **Return**: **`Promise<Komponent>`** that resolves when the component is fully loaded, rendered, and `init_komponent` has finished (or rejects when the mount fails). You can **`await`** it. Each instance also has **`readyPromise`** with the same semantics.
 
@@ -72,7 +79,7 @@ komponentor.scan(container?, { parent?, replaceExisting? })
 
 - **container**: Element/selector to scan; default `document.body`.
 - **parent**: Optional Komponent (or Intent) to attach mounted components to.
-- **replaceExisting**: If `true`, destroy existing component on same host before mounting; default `false` (scan once per host).
+- **replaceExisting**: If `true`, remount components on markers that were already scanned; default `false` (each `data-komponent` node is scanned once per parent lifetime unless `replaceExisting: true`).
 
 **Example:**
 
@@ -127,7 +134,7 @@ komponentor.navigate(pathOrHash, { replace?, state? })
   - In `"hash"` mode: Object `{ "#/path": urlOrHandler, ... }`.
   - In `"history"` mode: Object `{ "/path": urlOrHandler, ... }`.
   - Value can be:
-    - **URL string** — Component is mounted with `replace: true` and route data.
+    - **URL string** — Component is mounted in the outlet with route data (existing komponent on outlet is destroyed first).
     - **Callback** — `(outletEl, route) => void`.
 - **notFound**: Optional. URL string or callback `(outletEl, route)`.
 - **ignore**: Optional string/regex/function (or array) used to skip route dispatch for matching URLs.
@@ -149,7 +156,7 @@ komponentor.route({
     "#/": "home.html",
     "#/users/:id": "user.html",
     "#/custom": (outletEl, route) => {
-      void komponentor.mount(outletEl, { url: "custom.html", data: { route }, replace: true });
+      void komponentor.mount(outletEl, { url: "custom.html", data: { route } });
     }
   },
   notFound: "404.html"
@@ -180,11 +187,11 @@ komponentor.navigate("/users/5");
 |--------|------|---------|-------------|
 | **url** | string | `""` | Component HTML URL. Can include spec: `"path.html|key=val|..."`. |
 | **data** | object | `{}` | Merged with spec/attributes; passed to `init_komponent(k, data)`. |
-| **replace** | boolean | `false` | If true, destroy existing component on same host before mounting. |
-| **replaceHost** | boolean | `false` | **Advanced.** Replace host with component root (host removed; host `id` copied). Component HTML must have **exactly one** top-level element; otherwise throws. |
+| **replaceHost** | boolean | `false` | **Advanced.** Swap host placeholder for component root (host removed; host `id` copied). Template must have **exactly one** top-level element; otherwise throws. Not the same as `navigate(..., { replace: true })` (history API). |
 | **autoload** | boolean | `true` | After mount, scan host for `data-komponent` and mount children. |
-| **overlay** | boolean | `true` | Show loading overlay during fetch. |
+| **overlay** | boolean | `true` | Show loading overlay during fetch (skipped when route transition overlay is active). |
 | **parent** | Komponent or Intent | `null` | Attach as child; destroyed when parent is destroyed. |
+| **replaceExistingChildren** | boolean | `false` | If `true`, autoload scan uses `replaceExisting: true` (remount nested markers). |
 
 ---
 
@@ -205,9 +212,8 @@ komponentor.navigate("/users/5");
 
 - **Properties**: **`$host`** (jQuery — primary host reference), **`hostEl`** (= `$host[0]`), `opts`, `data`, `ctx`, `parent`, `children`, **`readyPromise`** (resolves with this instance when ready; **rejects** on mount error or when load is aborted/stale — in the latter case `ctx.state` is set to `"error"`).
 - **Methods**:
-  - **`find(selector)`** — First element matching selector inside `$host`. Returns DOM element or `null`.
-  - **`findAll(selector)`** — Array of elements matching selector inside `$host`.
-  - **`mount()`** — Async; called by manager. Returns a Promise that resolves to this instance (or rejects via `readyPromise` on error/abort).
+  - **`find(selector)`** — jQuery collection: descendants inside `$host` (`$host.find(selector)`).
+  - **`mount()`** — Async; (re)fetch, render, init. Returns `Promise<this>`.
   - **`scan({ replaceExisting })`** — Scan this component’s `$host` for `data-komponent` and mount children (once per lifetime unless `replaceExisting: true`).
   - **`remount()`** — Destroy this component and mount a fresh one on the same `$host` (same opts).
   - **`destroy()`** — Destroy children, destroy context, clear or remove host content, unlink from parent.
@@ -218,8 +224,7 @@ komponentor.navigate("/users/5");
 
 - **Properties**: `url`, `data`, `outlet`, `ctx`, `parent`, `children`, **`readyPromise`** (resolves with this when mounted and init ran; **rejects** on any run failure), **`resultPromise`**, **`$host`** (jQuery wrapper; Intent owns it), **`hostEl`** (= `$host[0]` when mounted).
 - **Methods**:
-  - **`find(selector)`** — First element matching selector inside `$host`; `null` if not mounted.
-  - **`findAll(selector)`** — Array of elements matching selector inside `$host`.
+  - **`find(selector)`** — jQuery collection inside intent wrapper (`$host.find(selector)`).
   - **`run()`** — Load HTML, mount wrapper into outlet, run init. **On success** returns `this`. **On failure** (no url, load aborted/stale, outlet not found, init throws): sets `ctx.state` to `"error"`, rejects `readyPromise`, unmounts wrapper if already in DOM, then **throws** — so `send()` / `runIntent()` reject.
   - **`close(result?)`** — Unmount `$host`, resolve `resultPromise` with `result`, then destroy. Use for dialogs.
   - **`destroy()`** — Unmount `$host`, resolve `resultPromise` with `undefined` if not yet settled, tear down.
@@ -248,17 +253,17 @@ komponentor.navigate("/users/5");
 
 - Fetched HTML can contain a **`<script>`** that defines **`function init_komponent(k, data)`**.
 - **k**: Komponent or Intent instance.
-- **data**: Merged options data (spec + attributes + programmatic).
+- **data**: Merged options data (spec + attributes + programmatic). Router mounts add **`data.route`**: hash mode `{ hash, params }`; history mode `{ path, search, params }`.
 - Scripts are **stripped** from the fragment; only the init function is extracted and run. No global pollution.
 - **Fail fast**: If script parsing or execution fails when extracting `init_komponent`, the error is thrown and the mount/intent run goes into the error flow (no silent fallback).
-- Init can use `k.ctx.onDestroy(...)` for cleanup, `k.find()` / `k.findAll()`, and for Intents: `k.close(result)`, `k.$host`, etc.
+- Init can use `k.ctx.onDestroy(...)` for cleanup, **`k.find()`** (jQuery — use `.text()`, `.on()`, etc.), and for Intents: `k.close(result)`, `k.$host`, etc.
 
 **Example (Komponent):**
 
 ```javascript
 function init_komponent(k, data) {
   k.ctx.onDestroy(() => { /* cleanup */ });
-  void komponentor.mount(k.find("#nested"), "nested.html", { parent: k }); // or await if init_komponent is async
+  await komponentor.mount(k.find("#nested"), { url: "nested.html", parent: k });
 }
 ```
 
@@ -266,9 +271,9 @@ function init_komponent(k, data) {
 
 ```javascript
 function init_komponent(k) {
-  const modalEl = k.$host.find(".modal")[0];
-  modalEl.addEventListener("hidden.bs.modal", () => k.close());
-  new bootstrap.Modal(modalEl).show();
+  const $modal = k.find(".modal");
+  $modal.on("hidden.bs.modal", () => k.close());
+  new bootstrap.Modal($modal[0]).show();
 }
 ```
 
@@ -282,8 +287,15 @@ komponentor.config.baseUrl     // string; prepended to URLs starting with /
 komponentor.config.markerAttr  // string; default "data-komponent"
 komponentor.config.overlayClass
 komponentor.config.overlayHtml
-komponentor.config.errorHtml  // (url, err) => string
-komponentor.config.fetchOptions  // object; passed to fetch() for component/intent requests
+komponentor.config.errorHtml(url, err)  // => HTML string; default does not escape url — override for untrusted urls
+komponentor.config.fetchOptions       // passed to fetch()
+komponentor.config.hostKomponentDataKey      // default "komponentorKomponent" (jQuery .data)
+komponentor.config.hostKomponentMountedAttr  // default "data-komponentor-instance"
+komponentor.config.routeTransitionOverlay    // default true (full-page loader on route change)
+komponentor.config.routeTransitionClass
+komponentor.config.routeTransitionHtml
+komponentor.config.routeTransitionFadeMs
+komponentor.config.routeTransitionBackground
 ```
 
 ---
@@ -292,7 +304,7 @@ komponentor.config.fetchOptions  // object; passed to fetch() for component/inte
 
 Use when you need instance tracking or normalization:
 
-- **`komponentor.getInst(elOrJq)`** — Komponent or Intent attached to element, or `null`.
+- **`komponentor.getInst(elOrJq)`** — **Komponent** on that host element, or `null` (intents are not stored on arbitrary hosts).
 - **`komponentor.setInst(elOrJq, inst)`** — Attach instance to element (internal).
 - **`komponentor.clearInst(elOrJq, inst)`** — Clear only if current instance is `inst`.
 - **`komponentor.lockHost(elOrJq, owner)`** — Lock host for mount (prevents concurrent mount). Returns `true` if locked. **owner** is the lock token (e.g. a plain object) or the instance that holds the lock; same value must be passed to `unlockHost`.
@@ -312,7 +324,7 @@ Arguments can be DOM element, jQuery collection, or selector string. Instance tr
 
 ## 14. Common patterns (for AI)
 
-- **Root + scan**: `komponentor.root("#app", "app.html");` — app.html’s init can call `komponentor.scan(k.$host, { parent: k })` or rely on `autoload: true`.
+- **Root + scan**: `await komponentor.root("#app", "app.html");` — app.html’s init can call `komponentor.scan(k.$host, { parent: k })` or rely on `autoload: true`.
 - **Router (hash)**: `komponentor.route({ mode: "hash", outlet: "#app", routes: { "#/": "home.html" } });` then links with `href="#/..."` or `komponentor.navigate("#/path")`.
 - **Router (history)**: `komponentor.route({ mode: "history", outlet: "#app", routes: { "/": "home.html" } });` then links with normal paths (`href="/..."`) or `komponentor.navigate("/path")`.
 - **Modal with result**: Use `try/catch` (or `.catch()`) on `send()` / `runIntent()` — they reject when the intent fails. On success: `const i = await komponentor.intent("modal.html").data({ model }).send({ parent: k }); const result = await i.resultPromise;` and in modal init/button: `k.close({ confirmed: true })`.

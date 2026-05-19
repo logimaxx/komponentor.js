@@ -142,6 +142,13 @@ Returns the **KModel** attached to the nearest ancestor that is a KView root (`[
 
 Templates are compiled once from the element’s `outerHTML` at construction time.
 
+### Escaping and XSS
+
+- **Built-in fallback:** `{{key}}` values are converted with `String(value)` and written into HTML **without escaping**. If `model` data can contain user input or route parameters, this can cause **cross-site scripting (XSS)**.
+- **Handlebars:** `{{name}}` is HTML-escaped by default. `{{{name}}}` and helpers that emit raw HTML are unsafe with untrusted data.
+
+**Mitigation:** Only bind trusted data; sanitize or escape before `model.update()`; prefer Handlebars default mustaches; use `.text()` in jQuery when setting DOM from params. See **[SECURITY.md](./SECURITY.md)**.
+
 ---
 
 ## Integration with Komponentor
