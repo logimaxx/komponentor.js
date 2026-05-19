@@ -1,4 +1,4 @@
-/*! komponentor v1.2.0
+/*! komponentor v1.3.0
  * Lightweight HTML-based components, hash routing, and intents for jQuery apps — no build step required.
  * (c) 2026 Sergiu Voicu <https://logimaxx.ro>
  * Released under the MIT License

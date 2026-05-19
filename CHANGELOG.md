@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+
+## [1.3.0] - 2026-05-19
+
 ### Added
 
 - **docs/SECURITY.md** — trust model, XSS, CSP, safe URLs and templates.
@@ -38,3 +41,5 @@ First npm release. Earlier git tags `1.0.0` and `1.1.0` were informal milestones
 - Updated `README.md` install instructions and demo workflow.
 
 [1.2.0]: https://github.com/vsergione/komponentor.js/releases/tag/1.2.0
+
+[1.3.0]: https://github.com/vsergione/komponentor.js/releases/tag/1.3.0
